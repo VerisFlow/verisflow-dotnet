@@ -4,40 +4,56 @@ on:
   push:
     tags:
       - 'tracelogic-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package Version to publish (e.g. 0.1.0)'
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
-  build-test-and-publish:
+  publish:
     runs-on: windows-latest
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v5
 
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v5
+      with:
           dotnet-version: |
             8.0.x
             9.0.x
 
-      - name: Restore dependencies
-        run: dotnet restore VerisFlow.Libraries.slnx
+    - name: Restore dependencies
+      run: |
+        dotnet restore src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj
+        dotnet restore tests/TraceLogic.Tests/TraceLogic.Core.Tests.csproj
 
-      - name: Build project
-        run: dotnet build src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Release --no-restore
+    - name: Build project
+      run: |
+        dotnet build src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj --no-restore -c Release
+        dotnet build tests/TraceLogic.Tests/TraceLogic.Core.Tests.csproj --no-restore -c Release
 
-      - name: Run unit tests
-        run: dotnet test VerisFlow.Libraries.slnx -c Release --no-build
+    - name: Run unit tests
+      run: dotnet test tests/TraceLogic.Tests/TraceLogic.Core.Tests.csproj --no-build -c Release --verbosity normal
 
-      - name: Pack package
-        shell: bash
-        run: |
-          # Extract clean semver version from project-prefixed tag
-          VERSION=${GITHUB_REF_NAME#tracelogic-v}
-          dotnet pack src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Release -p:PackageVersion=$VERSION -o ./artifacts
+    - name: Pack package
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          RAW_VERSION="${{ github.event.inputs.version }}"
+          # Strip leading 'v' if user accidentally provides it
+          VERSION="${RAW_VERSION#v}"
+        else
+          TAG_NAME="${{ github.ref_name }}"
+          VERSION="${TAG_NAME#tracelogic-v}"
+        fi
+        dotnet pack src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Release --no-build -o ./nupkgs /p:PackageVersion=$VERSION
+      shell: bash
 
-      - name: Publish to NuGet.org via OIDC
-        run: dotnet nuget push ./artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
+    - name: Publish to NuGet.org via OIDC
+      run: dotnet nuget push ./nupkgs/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
