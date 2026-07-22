@@ -1,0 +1,43 @@
+name: Publish VerisFlow.TraceLogic.Core
+
+on:
+  push:
+    tags:
+      - 'tracelogic-v*.*.*'
+
+jobs:
+  build-test-and-publish:
+    runs-on: windows-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore VerisFlow.Libraries.slnx
+
+      - name: Build project
+        run: dotnet build src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test VerisFlow.Libraries.slnx -c Release --no-build
+
+      - name: Pack package
+        shell: bash
+        run: |
+          # Extract clean semver version from project-prefixed tag
+          VERSION=${GITHUB_REF_NAME#tracelogic-v}
+          dotnet pack src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Release -p:PackageVersion=$VERSION -o ./artifacts
+
+      - name: Publish to NuGet.org via OIDC
+        run: dotnet nuget push ./artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
