@@ -1,0 +1,31 @@
+<Project>
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <Authors>Xianghua Chu</Authors>
+    <Company>VerisFlow</Company>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    
+    <!-- Repository Metadata -->
+    <RepositoryUrl>https://github.com/VerisFlow/verisflow-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    
+    <!-- SourceLink Configuration -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    
+    <!-- Default to non-packable globally to prevent accidental packaging of samples/tests -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Only enable packaging for projects inside src/ folder -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('src'))">
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+</Project>
