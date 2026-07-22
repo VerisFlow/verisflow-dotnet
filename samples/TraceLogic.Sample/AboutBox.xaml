@@ -1,0 +1,49 @@
+﻿<Window x:Class="TraceLogic.AboutBox"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="About Trace Extractor" 
+        Height="320" 
+        Width="450"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="#F0F2F5">
+    <Grid>
+        <StackPanel Margin="20">
+            <Path Data="M19,3H5C3.9,3 3,3.9 3,5V19C3,20.1 3.9,21 5,21H19C20.1,21 21,20.1 21,19V5C21,3.9 20.1,3 19,3M9,17H7V15H9V17M9,13H7V11H9V13M9,9H7V7H9V9M17,17H11V15H17V17M17,13H11V11H17V13M17,9H11V7H17V9Z" 
+                  Fill="#0078D7" 
+                  Width="40" 
+                  Height="40" 
+                  Stretch="Uniform" 
+                  HorizontalAlignment="Center" 
+                  Margin="0,5,0,10"/>
+
+            <TextBlock Text="Trace Extractor"
+                       FontSize="22" 
+                       FontWeight="SemiBold"
+                       HorizontalAlignment="Center" 
+                       Margin="0,0,0,5"/>
+
+            <TextBlock x:Name="VersionTextBlock"
+                       Text="Version: 1.0.0"
+                       FontSize="14"
+                       Foreground="#555555"
+                       HorizontalAlignment="Center" 
+                       Margin="0,0,0,20"/>
+
+            <Separator/>
+
+            <TextBlock Text="A tool for extracting and exporting data from Hamilton Venus (.trc) files."
+                       TextWrapping="Wrap"
+                       TextAlignment="Center"
+                       HorizontalAlignment="Center" 
+                       Margin="0,20,0,20"/>
+
+            <TextBlock Text="© 2025 VerisFlow. All Rights Reserved."
+                       FontSize="12"
+                       Foreground="Gray"
+                       HorizontalAlignment="Center" 
+                       Margin="0,10,0,0"/>
+        </StackPanel>
+    </Grid>
+</Window>
