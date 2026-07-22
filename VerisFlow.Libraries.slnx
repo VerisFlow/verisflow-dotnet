@@ -1,4 +1,5 @@
 <Solution>
 	<Project Path="samples/TraceLogic.Sample/VerisFlow.TraceLogic.Sample.csproj" />
 	<Project Path="src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj" />
+	<Project Path="tests/TraceLogic.Tests/TraceLogic.Core.Tests.csproj" />
 </Solution>

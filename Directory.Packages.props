@@ -13,12 +13,15 @@
     <PackageVersion Include="xunit" Version="2.9.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="coverlet.collector" Version="6.0.2" />
+    <PackageVersion Include="Moq" Version="4.20.70" />
+
     <!-- Core Application Dependencies -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="8.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
     <PackageVersion Include="Microsoft.Bcl.AsyncInterfaces" Version="8.0.0" />
     <PackageVersion Include="System.Text.Json" Version="8.0.5" />
+    
     <!-- Source Generator Polyfills -->
     <PackageVersion Include="PolySharp" Version="1.14.1" />
   </ItemGroup>
