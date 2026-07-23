@@ -10,8 +10,10 @@ The solution isolates core library modules from desktop sample applications, mai
 
 * **`src/`**: Production-ready core libraries published to NuGet.
   * **`VerisFlow.TraceLogic.Core`**: Parser, locator, and exporter for Hamilton Venus trace log (`.trc`) files. Supports asynchronous streaming and zero-allocation regex algorithms. (See [Package README](src/VerisFlow.TraceLogic.Core/README.md) | [Changelog](src/VerisFlow.TraceLogic.Core/CHANGELOG.md))
+  * **`VerisFlow.VenusAuto.Core`**: Non-intrusive background automation engine for Hamilton Venus software via Win32 API interactions. Provides run control (`Start`, `Pause`, `Resume`, `Abort`), dialog interception (`IDialogGuard`), and system status snapshots. (See [Package README](src/VerisFlow.VenusAuto.Core/README.md) | [Changelog](src/VerisFlow.VenusAuto.Core/CHANGELOG.md))
 * **`samples/`**: Sample applications and UI testbeds.
-  * **`TraceLogic.Sample`**: WPF desktop application demonstrating real-world integration, UI data binding, and CSV export functionality using `VerisFlow.TraceLogic.Core`.
+  * **`VerisFlow.TraceLogic.Sample`**: WPF desktop application demonstrating real-world integration, UI data binding, and CSV export functionality using `VerisFlow.TraceLogic.Core`.
+  * **`VerisFlow.VenusAuto.Sample`**: WPF desktop application demonstrating real-time UI element probing, global hotkey capture (F2), Win32 action simulation, and execution control testing using `VerisFlow.VenusAuto.Core`.
 
 ---
 
@@ -33,10 +35,11 @@ dotnet build VerisFlow.Libraries.slnx -c Release
 
 ### Local Packaging
 
-To build and generate local `.nupkg` and `.snupkg` package artifacts:
+To build and generate local `.nupkg` and `.snupkg` package artifacts for core libraries:
 
 ```bash
 dotnet pack src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Release -o ./artifacts
+dotnet pack src/VerisFlow.VenusAuto.Core/VerisFlow.VenusAuto.Core.csproj -c Release -o ./artifacts
 
 ```
 
@@ -47,9 +50,17 @@ dotnet pack src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Re
 This repository enforces consistent C# coding standards and deterministic build configurations:
 
 1. **Central Package Management (CPM)**: Package versions are defined exclusively in `Directory.Packages.props`. Individual `.csproj` files only reference package names without version numbers.
+
+
 2. **Global Build Properties**: Shared properties such as `Nullable`, `ImplicitUsings`, `LangVersion`, `IncludeSymbols`, and `PackageLicenseExpression` are inherited from `Directory.Build.props`.
+
+
 3. **Source Link & Reproducible Builds**: Configured with `PublishRepositoryUrl`, `EmbedUntrackedSources`, and `ContinuousIntegrationBuild` to ensure a seamless debugging experience for package consumers.
+
+
 4. **Deterministic Feeds**: `nuget.config` explicitly maps package patterns to trusted sources to prevent dependency confusion attacks.
+
+
 
 ---
 
