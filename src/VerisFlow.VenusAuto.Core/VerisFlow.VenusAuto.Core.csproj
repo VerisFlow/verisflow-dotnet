@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+      <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+      <Version>0.1.0</Version>
+      
+      <!-- Package Identification and Namespace Alignment -->
+      <PackageId>VerisFlow.VenusAuto.Core</PackageId>
+      <Title>VerisFlow.VenusAuto.Core</Title>
+      <RootNamespace>VerisFlow.VenusAuto.Core</RootNamespace>
+      <AssemblyName>VerisFlow.VenusAuto.Core</AssemblyName>
+      
+      <Description>Automation and Win32 window interop abstraction library for Venus run-control engines.</Description>
+      <PackageTags>automation;interop;win32;ui-automation;lab-automation</PackageTags>
+      <PackageReadmeFile>README.md</PackageReadmeFile>
+      <PackageIcon>icon.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+      <InternalsVisibleTo Include="VenusAuto.Core.Tests" />
+      <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
+  <ItemGroup>
+      <None Include="README.md" Pack="true" PackagePath="\" />
+      <None Include="icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+      <PackageReference Include="Microsoft.Extensions.Configuration" />
+      <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+      <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+      <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+      <PackageReference Include="Microsoft.Extensions.Options" />
+      <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+      <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+  </ItemGroup>
+
+</Project>

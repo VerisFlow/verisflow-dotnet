@@ -1,0 +1,375 @@
+﻿<Window x:Class="VerisFlow.VenusAuto.Sample.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VerisFlow Venus Auto"
+        Width="820" MinWidth="820"
+        Topmost="True" WindowStartupLocation="CenterScreen"
+        Background="#1E1E2E" FontFamily="Segoe UI"
+        ResizeMode="CanResizeWithGrip"
+        SizeToContent="Height">
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="BgSurface"   Color="#2A2A3E"/>
+        <SolidColorBrush x:Key="AccentBlue"  Color="#7C6AF7"/>
+        <SolidColorBrush x:Key="AccentCyan"  Color="#5BC8AF"/>
+        <SolidColorBrush x:Key="TextPrimary" Color="#E8E8F0"/>
+        <SolidColorBrush x:Key="TextMuted"   Color="#8888AA"/>
+        <SolidColorBrush x:Key="BorderColor" Color="#3E3E5A"/>
+
+        <Style x:Key="ReadOnlyField" TargetType="TextBox">
+            <Setter Property="Background"               Value="#252538"/>
+            <Setter Property="Foreground"               Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush"              Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness"          Value="1"/>
+            <Setter Property="Padding"                  Value="8,4"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="FontSize"                 Value="12"/>
+            <Setter Property="FontFamily"               Value="Consolas"/>
+            <Setter Property="CaretBrush"               Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EditableField" TargetType="TextBox">
+            <Setter Property="Background"               Value="#252538"/>
+            <Setter Property="Foreground"               Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush"              Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness"          Value="1"/>
+            <Setter Property="Padding"                  Value="8,4"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="FontSize"                 Value="13"/>
+            <Setter Property="CaretBrush"               Value="{StaticResource AccentBlue}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="{StaticResource AccentBlue}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ActionButton" TargetType="Button">
+            <Setter Property="Background"      Value="{StaticResource AccentBlue}"/>
+            <Setter Property="Foreground"      Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Height"          Value="30"/>
+            <Setter Property="FontSize"        Value="12"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#6657E8"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#5546D4"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Background" Value="#3E3E5A"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource ActionButton}">
+            <Setter Property="Background" Value="#2E2E4A"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#3A3A58"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="FontSize"   Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin"     Value="0,6,0,3"/>
+        </Style>
+
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="FontSize"   Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+
+        <Style x:Key="GroupLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="FontSize"   Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin"     Value="0,8,0,4"/>
+        </Style>
+    </Window.Resources>
+
+    <StackPanel>
+        <Border Background="#16162A" Height="44">
+            <Grid Margin="16,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="8" Height="8" Fill="{StaticResource AccentCyan}" Margin="0,0,8,0"/>
+                    <TextBlock Text="UI Capture and Auto" Style="{StaticResource SectionHeader}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Border Grid.Column="1" Background="#252538" CornerRadius="4" Padding="10,4">
+                    <TextBlock Foreground="{StaticResource AccentCyan}" FontSize="12" FontWeight="SemiBold">
+                        <Run Text="F2"/>
+                        <Run Text=" — Capture" Foreground="{StaticResource TextMuted}"/>
+                    </TextBlock>
+                </Border>
+            </Grid>
+        </Border>
+        
+        <Grid Margin="12,10,12,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3.6*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="2.8*"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="3.6*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ── Col 0: Target Properties ── -->
+            <Border Grid.Column="0"
+                    Background="{StaticResource BgSurface}"
+                    BorderBrush="{StaticResource BorderColor}"
+                    BorderThickness="1" CornerRadius="8" Padding="14,12">
+                <StackPanel DataContext="{Binding CurrentCapture}">
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Target Properties" Style="{StaticResource SectionHeader}"/>
+                        <Border Margin="8,0,0,0" Background="#1E2E3E" CornerRadius="3" Padding="6,2">
+                            <TextBlock Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss.fff}'}"
+                                       Foreground="{StaticResource AccentCyan}" FontSize="11" FontFamily="Consolas"/>
+                        </Border>
+                    </StackPanel>
+                    <Rectangle Height="1" Fill="{StaticResource BorderColor}" Margin="0,0,0,8"/>
+
+                    <!-- HWND / Parent HWND -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="HWND" Style="{StaticResource FieldLabel}"/>
+                            <TextBox Text="{Binding Hwnd, Mode=OneWay}" IsReadOnly="True" Style="{StaticResource ReadOnlyField}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Parent HWND" Style="{StaticResource FieldLabel}"/>
+                            <TextBox Text="{Binding ParentHwnd, Mode=OneWay}" IsReadOnly="True" Style="{StaticResource ReadOnlyField}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Text="Class Name" Style="{StaticResource FieldLabel}"/>
+                    <TextBox Text="{Binding ClassName, Mode=OneWay}" IsReadOnly="True" Style="{StaticResource ReadOnlyField}"/>
+
+                    <TextBlock Text="Window Text" Style="{StaticResource FieldLabel}"/>
+                    <TextBox Text="{Binding WindowText, Mode=OneWay}" IsReadOnly="True"
+                             Style="{StaticResource ReadOnlyField}" Height="40" TextWrapping="Wrap"/>
+
+                    <!-- Absolute / Relative -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Absolute (X, Y)" Style="{StaticResource FieldLabel}"/>
+                            <Border Background="#252538" BorderBrush="{StaticResource BorderColor}"
+                                    BorderThickness="1" CornerRadius="4" Padding="8,5">
+                                <TextBlock FontFamily="Consolas" FontSize="12" Foreground="{StaticResource TextPrimary}">
+                                    <Run Text="{Binding AbsoluteX, Mode=OneWay}"/>
+                                    <Run Text=",  " Foreground="{StaticResource TextMuted}"/>
+                                    <Run Text="{Binding AbsoluteY, Mode=OneWay}"/>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Relative (X, Y)" Style="{StaticResource FieldLabel}"/>
+                            <Border Background="#1A2535" BorderBrush="#3A5A7A"
+                                    BorderThickness="1" CornerRadius="4" Padding="8,5">
+                                <TextBlock FontFamily="Consolas" FontSize="12" FontWeight="SemiBold" Foreground="#5BC8AF">
+                                    <Run Text="{Binding RelativeX, Mode=OneWay}"/>
+                                    <Run Text=",  " Foreground="{StaticResource TextMuted}"/>
+                                    <Run Text="{Binding RelativeY, Mode=OneWay}"/>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Pixel Color -->
+                    <TextBlock Text="Pixel Color" Style="{StaticResource FieldLabel}"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="34" Height="26"
+                                BorderBrush="{StaticResource BorderColor}" BorderThickness="1" CornerRadius="4">
+                            <Border.Background>
+                                <SolidColorBrush Color="{Binding PixelColor, FallbackValue=Transparent}"/>
+                            </Border.Background>
+                        </Border>
+                        <TextBox Grid.Column="2" Text="{Binding ColorHex, Mode=OneWay}"
+                                 IsReadOnly="True" Style="{StaticResource ReadOnlyField}"/>
+                    </Grid>
+
+                </StackPanel>
+            </Border>
+
+            <!-- ── Col 2: Action Tester ── -->
+            <Border Grid.Column="2"
+                    Background="{StaticResource BgSurface}"
+                    BorderBrush="{StaticResource BorderColor}"
+                    BorderThickness="1" CornerRadius="8" Padding="14,12">
+                <StackPanel>
+                    <TextBlock Text="Action Tester" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
+                    <Rectangle Height="1" Fill="{StaticResource BorderColor}" Margin="0,0,0,10"/>
+
+                    <TextBlock Text="Simulate actions on the captured HWND."
+                               Foreground="{StaticResource TextMuted}"
+                               FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+
+                    <!-- Mouse -->
+                    <TextBlock Text="MOUSE" Style="{StaticResource GroupLabel}" Margin="0,10,0,4"/>
+                    <Border Background="#1A2535" BorderBrush="#3A5A7A"
+                            BorderThickness="1" CornerRadius="6" Padding="10,8">
+                        <Button Content="Test Relative Click"
+                                Command="{Binding TestClickCommand}"
+                                Style="{StaticResource ActionButton}"/>
+                    </Border>
+
+                    <!-- Keyboard -->
+                    <TextBlock Text="KEYBOARD" Style="{StaticResource GroupLabel}" Margin="0,10,0,4"/>
+                    <Border Background="#1E1A2E" BorderBrush="#4A3A6A"
+                            BorderThickness="1" CornerRadius="6" Padding="10,8">
+                        <StackPanel>
+                            <TextBlock Text="Text to send:" Foreground="{StaticResource TextMuted}"
+                                       FontSize="11" Margin="0,0,0,4"/>
+                            <TextBox Text="{Binding TestInputText, UpdateSourceTrigger=PropertyChanged}"
+                                     Height="26" Style="{StaticResource EditableField}" Margin="0,0,0,8"/>
+                            <Button Content="Test Send Keys"
+                                    Command="{Binding TestTextCommand}"
+                                    Style="{StaticResource SecondaryButton}"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ── Col 4: Engine Control ── -->
+            <Border Grid.Column="4"
+                    Background="#18242A" BorderBrush="#2A5C54"
+                    BorderThickness="1" CornerRadius="8" Padding="14,12">
+                <StackPanel>
+                    <TextBlock Text="Engine Control" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
+                    <Rectangle Height="1" Fill="#2A5C54" Margin="0,0,0,4"/>
+
+                    <!-- Lifecycle -->
+                    <TextBlock Text="LIFECYCLE" Style="{StaticResource GroupLabel}"/>
+                    <UniformGrid Columns="2">
+                        <Button Content="Start"  Command="{Binding TestEngineStartCommand}"
+                                Style="{StaticResource ActionButton}" Background="#2B7A6A" Margin="0,0,3,3"/>
+                        <Button Content="Status" Command="{Binding TestEngineStatusCommand}"
+                                Style="{StaticResource ActionButton}" Background="#2B7A6A" Margin="3,0,0,3"/>
+                        <Button Content="Pause"  Command="{Binding TestEnginePauseCommand}"
+                                Style="{StaticResource ActionButton}" Background="#B57628" Margin="0,0,3,0"/>
+                        <Button Content="Resume" Command="{Binding TestEngineResumeCommand}"
+                                Style="{StaticResource ActionButton}" Background="#2B7A6A" Margin="3,0,0,0"/>
+                    </UniformGrid>
+
+                    <!-- Window -->
+                    <TextBlock Text="WINDOW" Style="{StaticResource GroupLabel}"/>
+                    <UniformGrid Columns="2">
+                        <Button Content="Ensure Started" Command="{Binding TestEnsureStartedCommand}"
+                                Style="{StaticResource ActionButton}" Background="#3A75C4" Margin="0,0,3,0"/>
+                        <Button Content="Arrange Window" Command="{Binding TestArrangeWindowCommand}"
+                                Style="{StaticResource ActionButton}" Background="#3A75C4" Margin="3,0,0,0"/>
+                    </UniformGrid>
+
+                    <!-- Danger -->
+                    <TextBlock Text="DANGER" Style="{StaticResource GroupLabel}"/>
+                    <Button Content="Abort" Command="{Binding TestEngineAbortCommand}"
+                            Style="{StaticResource ActionButton}" Background="#A63D40"/>
+
+                    <!-- Output -->
+                    <TextBlock Text="OUTPUT" Style="{StaticResource GroupLabel}"/>
+                    <TextBox Text="{Binding IntegrationTestOutput}" IsReadOnly="True"
+                             Style="{StaticResource ReadOnlyField}" Height="80"
+                             TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Border Margin="12,8,12,12"
+                Background="#18242A" BorderBrush="#2A5C54"
+                BorderThickness="1" CornerRadius="8" Padding="14,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="20"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="Method Loading" Style="{StaticResource SectionHeader}"/>
+                    <TextBlock Text="Load a method into the engine"
+                               Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,2,0,0"/>
+                </StackPanel>
+
+                <TextBox Grid.Column="2" Text="{Binding MethodFilePath}"
+                         IsReadOnly="True" Style="{StaticResource ReadOnlyField}"
+                         Height="30" VerticalAlignment="Center"/>
+
+                <Button Grid.Column="4" Content="Browse…"
+                        Command="{Binding BrowseMethodCommand}"
+                        Style="{StaticResource SecondaryButton}"
+                        Height="30" Padding="12,0" VerticalAlignment="Center"/>
+
+                <Button Grid.Column="6" Content="Load Method"
+                        Command="{Binding TestEngineLoadCommand}"
+                        Style="{StaticResource ActionButton}"
+                        Background="#7C6AF7" Height="30" Padding="14,0" VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+    </StackPanel>
+</Window>
