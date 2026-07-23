@@ -25,9 +25,9 @@ jobs:
     - name: Setup .NET SDK
       uses: actions/setup-dotnet@v5
       with:
-          dotnet-version: |
-            8.0.x
-            9.0.x
+        dotnet-version: |
+          8.0.x
+          9.0.x
 
     - name: Restore dependencies
       run: |
@@ -52,8 +52,15 @@ jobs:
           TAG_NAME="${{ github.ref_name }}"
           VERSION="${TAG_NAME#tracelogic-v}"
         fi
-        dotnet pack src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Release --no-build -o ./nupkgs /p:PackageVersion=$VERSION
+        dotnet pack src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj -c Release --no-build -o ./nupkgs -p:PackageVersion="$VERSION"
       shell: bash
 
+    - name: NuGet login
+      uses: NuGet/login@v1
+      id: login
+      with:
+        user: Xianghua
+
     - name: Publish to NuGet.org via OIDC
-      run: dotnet nuget push ./nupkgs/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
+      run: dotnet nuget push ./nupkgs/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      shell: bash
