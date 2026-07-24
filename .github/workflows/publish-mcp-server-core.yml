@@ -1,0 +1,61 @@
+name: Publish VerisFlow.Mcp.Server
+
+on:
+  push:
+    tags:
+      - 'mcp-server-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package Version to publish (e.g. 0.1.0)'
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: |
+          8.0.x
+          9.0.x
+
+    - name: Restore dependencies
+      run: |
+        dotnet restore src/VerisFlow.Mcp.Server/VerisFlow.Mcp.Server.csproj
+
+    - name: Build project
+      run: |
+        dotnet build src/VerisFlow.Mcp.Server/VerisFlow.Mcp.Server.csproj --no-restore -c Release
+
+    - name: Pack package
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          RAW_VERSION="${{ github.event.inputs.version }}"
+          # Strip leading 'v' if user accidentally provides it
+          VERSION="${RAW_VERSION#v}"
+        else
+          TAG_NAME="${{ github.ref_name }}"
+          VERSION="${TAG_NAME#mcp-server-v}"
+        fi
+        dotnet pack src/VerisFlow.Mcp.Server/VerisFlow.Mcp.Server.csproj -c Release --no-build -o ./nupkgs -p:PackageVersion="$VERSION"
+      shell: bash
+
+    - name: NuGet login
+      uses: NuGet/login@v1
+      id: login
+      with:
+        user: Xianghua
+
+    - name: Publish to NuGet.org via OIDC
+      run: dotnet nuget push ./nupkgs/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      shell: bash

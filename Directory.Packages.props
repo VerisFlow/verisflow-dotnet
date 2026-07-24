@@ -26,6 +26,7 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
     <PackageVersion Include="Microsoft.Bcl.AsyncInterfaces" Version="8.0.0" />
     <PackageVersion Include="System.Text.Json" Version="8.0.5" />
+	<PackageVersion Include="System.Threading.Channels" Version="8.0.0" />
     <!-- Source Generator Polyfills -->
     <PackageVersion Include="PolySharp" Version="1.16.0" />
   </ItemGroup>

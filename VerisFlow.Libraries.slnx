@@ -1,6 +1,10 @@
 <Solution>
 	<Project Path="samples/TraceLogic.Sample/VerisFlow.TraceLogic.Sample.csproj" />
+	<Project Path="samples/VerisFlow.Mcp.Client.Sample/VerisFlow.Mcp.Client.Sample.csproj" />
+	<Project Path="samples/VerisFlow.Mcp.Server.Sample/VerisFlow.Mcp.Server.Sample.csproj" />
 	<Project Path="samples/VerisFlow.VenusAuto.Sample/VerisFlow.VenusAuto.Sample.csproj" />
+	<Project Path="src/VerisFlow.Mcp.Client/VerisFlow.Mcp.Client.csproj" />
+	<Project Path="src/VerisFlow.Mcp.Server/VerisFlow.Mcp.Server.csproj" />
 	<Project Path="src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj" />
 	<Project Path="src/VerisFlow.VenusAuto.Core/VerisFlow.VenusAuto.Core.csproj" />
 	<Project Path="tests/TraceLogic.Tests/TraceLogic.Core.Tests.csproj" />
