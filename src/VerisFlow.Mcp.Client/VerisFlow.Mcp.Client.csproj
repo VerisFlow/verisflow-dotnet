@@ -1,0 +1,44 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <Version>0.1.0</Version>
+
+        <!-- Package Identification and Namespace Alignment -->
+        <PackageId>VerisFlow.Client</PackageId>
+        <Title>VerisFlow.Client</Title>
+        <RootNamespace>VerisFlow.Client</RootNamespace>
+        <AssemblyName>VerisFlow.Client</AssemblyName>
+
+        <Description>Client library for VerisFlow SignalR communication and event streaming.</Description>
+        <PackageTags>verisflow;client;signalr;automation</PackageTags>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageIcon>icon.png</PackageIcon>
+    </PropertyGroup>
+
+    <!-- Ensures reproducible binaries by normalizing source file paths when running in CI environments -->
+    <PropertyGroup Condition="'$(CI)' == 'true' or '$(GITHUB_ACTIONS)' == 'true'">
+        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md" Pack="true" PackagePath="\" />
+        <None Include="icon.png" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+        <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+        <PackageReference Include="System.Text.Json" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+      <PackageReference Include="PolySharp">
+        <PrivateAssets>all</PrivateAssets>
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      </PackageReference>
+    </ItemGroup>
+
+</Project>

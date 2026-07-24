@@ -22,6 +22,7 @@
     
     <!-- Default to non-packable globally to prevent accidental packaging of samples/tests -->
     <IsPackable>false</IsPackable>
+	<WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
   </PropertyGroup>
 
   <!-- Only enable packaging for projects inside src/ folder -->

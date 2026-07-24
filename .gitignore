@@ -73,3 +73,4 @@ appsettings.Local.json
 ehthumbs.db
 Thumbs.db
 desktop.ini
+/samples/VerisFlow.Mcp.Server.Sample/Properties/PublishProfiles

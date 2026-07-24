@@ -1,0 +1,138 @@
+﻿<Window x:Class="VerisFlow.Mcp.Client.Sample.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VerisFlow MCP Client Sample" Height="450" Width="600" Background="#1E1E1E">
+    <Window.Resources>
+        <!-- Toggle Switch Style -->
+        <Style x:Key="ToggleSwitchTrack" TargetType="Border">
+            <Setter Property="Width" Value="80"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="CornerRadius" Value="15"/>
+            <Setter Property="Background" Value="#3C3C3C"/>
+        </Style>
+
+        <!-- Connect Button Style with ripple support -->
+        <Style x:Key="ConnectButton" TargetType="Button">
+            <Setter Property="Width" Value="150"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Background" Value="#007ACC"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="RootGrid" ClipToBounds="True">
+                            <Border x:Name="BackgroundBorder"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="4"/>
+                            <!-- Ripple Ellipse -->
+                            <Ellipse x:Name="RippleEllipse"
+                                     Fill="White"
+                                     Opacity="0"
+                                     Width="0" Height="0"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Top"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <TranslateTransform x:Name="RippleTranslate"/>
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <EventTrigger RoutedEvent="Button.Click">
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="RippleEllipse"
+                                                         Storyboard.TargetProperty="Width"
+                                                         From="0" To="200" Duration="0:0:0.4"/>
+                                        <DoubleAnimation Storyboard.TargetName="RippleEllipse"
+                                                         Storyboard.TargetProperty="Height"
+                                                         From="0" To="200" Duration="0:0:0.4"/>
+                                        <DoubleAnimation Storyboard.TargetName="RippleTranslate"
+                                                         Storyboard.TargetProperty="X"
+                                                         From="-25" To="-100" Duration="0:0:0.4"/>
+                                        <DoubleAnimation Storyboard.TargetName="RippleTranslate"
+                                                         Storyboard.TargetProperty="Y"
+                                                         From="-25" To="-85" Duration="0:0:0.4"/>
+                                        <DoubleAnimation Storyboard.TargetName="RippleEllipse"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         From="0.3" To="0" Duration="0:0:0.4"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </EventTrigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BackgroundBorder" Property="Background" Value="#1A9AE6"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="BackgroundBorder" Property="Background" Value="#005A9E"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="BackgroundBorder" Property="Background" Value="#555555"/>
+                                <Setter Property="Foreground" Value="#999999"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10" VerticalAlignment="Center">
+
+            <!-- Toggle Switch: Dev / Prod -->
+            <Grid Width="110" Height="30" Margin="0,0,10,0" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="TxtDev" Grid.Column="0" Text="Dev"
+                           Foreground="White" FontSize="12" FontFamily="Segoe UI"
+                           VerticalAlignment="Center" Margin="0,0,5,0"/>
+
+                <!-- Track -->
+                <Border Grid.Column="1" Width="42" Height="22" CornerRadius="11"
+                        x:Name="ToggleTrack" Background="#3C3C3C"
+                        VerticalAlignment="Center" Cursor="Hand"
+                        MouseLeftButtonUp="ToggleSwitch_Click">
+                    <!-- Thumb -->
+                    <Ellipse x:Name="ToggleThumb" Width="16" Height="16"
+                             Fill="White" HorizontalAlignment="Left"
+                             VerticalAlignment="Center" Margin="3,0,0,0">
+                        <Ellipse.RenderTransform>
+                            <TranslateTransform x:Name="ThumbTranslate" X="0"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+                </Border>
+
+                <TextBlock x:Name="TxtProd" Grid.Column="2" Text="Prod"
+                           Foreground="#888888" FontSize="12" FontFamily="Segoe UI"
+                           VerticalAlignment="Center" Margin="5,0,0,0"/>
+            </Grid>
+
+            <Button x:Name="BtnToggle" Content="Connect to Relay"
+                    Style="{StaticResource ConnectButton}"
+                    Click="BtnToggle_Click"/>
+
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="15,0,0,0">
+                <TextBlock x:Name="TxtStatus" Text="Status: Offline" Foreground="LightGray"/>
+                <TextBlock Text=" | " Foreground="#555555" Margin="5,0"/>
+                <TextBlock x:Name="TxtVersion" Text="v0.0.0" Foreground="#888888" FontSize="11"/>
+            </StackPanel>
+        </StackPanel>
+
+        <TextBox x:Name="TxtLog" Grid.Row="1" Background="#2D2D30" Foreground="#D4D4D4"
+                 FontFamily="Consolas" FontSize="12" IsReadOnly="True"
+                 VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+    </Grid>
+</Window>
