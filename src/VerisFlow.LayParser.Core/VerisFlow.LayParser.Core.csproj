@@ -5,8 +5,8 @@
       <Version>0.1.0</Version>
       
       <!-- Package Identification -->
-      <PackageId>VerisFlow.VenusDeckParser.Core</PackageId>
-      <Title>VerisFlow.VenusDeckParser.Core</Title>
+      <PackageId>VerisFlow.LayParser.Core</PackageId>
+      <Title>VerisFlow.LayParser.Core</Title>
       
       <Description>Parser and data processor for Hamilton Venus deck layout (.lay) files.</Description>
       <PackageTags>venus;deck;layout;parser;labware;automation</PackageTags>

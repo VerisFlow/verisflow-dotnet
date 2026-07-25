@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\VerisFlow.LayParser.Core\VerisFlow.LayParserr.Core.csproj" />
+    <ProjectReference Include="..\..\src\VerisFlow.LayParser.Core\VerisFlow.LayParser.Core.csproj" />
   </ItemGroup>
 
 </Project>

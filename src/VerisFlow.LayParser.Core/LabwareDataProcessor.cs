@@ -1,7 +1,7 @@
 ﻿using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace VerisFlow.VenusDeckParser.Core
+namespace VerisFlow.LayParser.Core
 {
     /// <summary>
     /// A service class responsible for processing the raw labware data

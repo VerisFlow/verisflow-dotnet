@@ -1,7 +1,7 @@
 ﻿using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace VerisFlow.VenusDeckParser.Core
+namespace VerisFlow.LayParser.Core
 {
     public static class DeckLayoutParser
     {
