@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+      <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+      <Version>0.1.0</Version>
+      
+      <!-- Package Identification -->
+      <PackageId>VerisFlow.LayParser.Core</PackageId>
+      <Title>VerisFlow.LayParser.Core</Title>
+      
+      <Description>Parser and data processor for Hamilton Venus deck layout (.lay) files.</Description>
+      <PackageTags>venus;deck;layout;parser;labware;automation</PackageTags>
+      <PackageReadmeFile>README.md</PackageReadmeFile>
+      <PackageIcon>icon.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+      <None Include="README.md" Pack="true" PackagePath="\" />
+      <None Include="icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

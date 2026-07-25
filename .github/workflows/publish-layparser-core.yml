@@ -1,4 +1,4 @@
-name: Publish VerisFlow.VenusDeckParser.Core
+name: Publish VerisFlow.LayParser.Core
 
 on:
   push:
@@ -31,16 +31,16 @@ jobs:
 
     - name: Restore dependencies
       run: |
-        dotnet restore src/VerisFlow.VenusDeckParser.Core/VerisFlow.VenusDeckParser.Core.csproj
-        dotnet restore tests/VerisFlow.VenusDeckParser.Core.Tests/VerisFlow.VenusDeckParser.Core.Tests.csproj
+        dotnet restore src/VerisFlow.LayParser.Core/VerisFlow.LayParser.Core.csproj
+        dotnet restore tests/LayParser.Tests/LayParser.Core.Tests.csproj
 
     - name: Build project
       run: |
-        dotnet build src/VerisFlow.VenusDeckParser.Core/VerisFlow.VenusDeckParser.Core.csproj --no-restore -c Release
-        dotnet build tests/VerisFlow.VenusDeckParser.Core.Tests/VerisFlow.VenusDeckParser.Core.Tests.csproj --no-restore -c Release
+        dotnet build src/VerisFlow.LayParser.Core/VerisFlow.LayParser.Core.csproj --no-restore -c Release
+        dotnet build tests/LayParser.Tests/LayParser.Core.Tests.csproj --no-restore -c Release
 
     - name: Run unit tests
-      run: dotnet test tests/VerisFlow.VenusDeckParser.Core.Tests/VerisFlow.VenusDeckParser.Core.Tests.csproj --no-build -c Release --verbosity normal
+      run: dotnet test tests/LayParser.Tests/LayParser.Core.Tests.csproj --no-build -c Release --verbosity normal
 
     - name: Pack package
       run: |
@@ -50,9 +50,9 @@ jobs:
           VERSION="${RAW_VERSION#v}"
         else
           TAG_NAME="${{ github.ref_name }}"
-          VERSION="${TAG_NAME#venusdeckparser-v}"
+          VERSION="${TAG_NAME#layparser-v}"
         fi
-        dotnet pack src/VerisFlow.VenusDeckParser.Core/VerisFlow.VenusDeckParser.Core.csproj -c Release --no-build -o ./nupkgs -p:PackageVersion="$VERSION"
+        dotnet pack src/VerisFlow.LayParser.Core/VerisFlow.LayParser.Core.csproj -c Release --no-build -o ./nupkgs -p:PackageVersion="$VERSION"
       shell: bash
 
     - name: NuGet login

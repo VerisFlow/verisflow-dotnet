@@ -1,4 +1,4 @@
-﻿namespace VerisFlow.VenusDeckParser.Core
+﻿namespace VerisFlow.LayParser.Core
 {
     /// <summary>
     /// Enum to define the type of labware.

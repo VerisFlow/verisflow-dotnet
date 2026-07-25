@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using VerisFlow.VenusDeckParser.Core;
+using VerisFlow.LayParser.Core;
 using Xunit;
 
-namespace VerisFlow.VenusDeckParser.Core.Tests
+namespace VerisFlow.LayParser.Core.Tests
 {
     public class LabwareDataProcessorTests : IDisposable
     {
