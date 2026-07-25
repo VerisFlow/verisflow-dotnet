@@ -32,15 +32,15 @@ jobs:
     - name: Restore dependencies
       run: |
         dotnet restore src/VerisFlow.LayParser.Core/VerisFlow.LayParser.Core.csproj
-        dotnet restore tests/VerisFlow.LayParser.Core.Tests/VerisFlow.LayParser.Core.Tests.csproj
+        dotnet restore tests/LayParser.Core.Tests/LayParser.Core.Tests.csproj
 
     - name: Build project
       run: |
         dotnet build src/VerisFlow.LayParser.Core/VerisFlow.LayParser.Core.csproj --no-restore -c Release
-        dotnet build tests/VerisFlow.LayParser.Core.Tests/VerisFlow.LayParser.Core.Tests.csproj --no-restore -c Release
+        dotnet build tests/LayParser.Core.Tests/LayParser.Core.Tests.csproj --no-restore -c Release
 
     - name: Run unit tests
-      run: dotnet test tests/VerisFlow.LayParser.Core.Tests/VerisFlow.LayParser.Core.Tests.csproj --no-build -c Release --verbosity normal
+      run: dotnet test tests/LayParser.Core.Tests/LayParser.Core.Tests.csproj --no-build -c Release --verbosity normal
 
     - name: Pack package
       run: |
