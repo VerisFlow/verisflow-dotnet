@@ -8,6 +8,7 @@
 	<Project Path="src/VerisFlow.Mcp.Server/VerisFlow.Mcp.Server.csproj" />
 	<Project Path="src/VerisFlow.TraceLogic.Core/VerisFlow.TraceLogic.Core.csproj" />
 	<Project Path="src/VerisFlow.VenusAuto.Core/VerisFlow.VenusAuto.Core.csproj" />
+	<Project Path="tests/LayParser.Tests/LayParser.Core.Tests.csproj" />
 	<Project Path="tests/TraceLogic.Tests/TraceLogic.Core.Tests.csproj" />
 	<Project Path="tests/VenusAuto.Tests/VenusAuto.Core.Tests.csproj" />
 </Solution>
