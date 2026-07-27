@@ -65,9 +65,6 @@
     <Reference Include="System.Xaml">
       <RequiredTargetFramework>4.0</RequiredTargetFramework>
     </Reference>
-    <Reference Include="VerisFlow.LayParser.Core, Version=0.1.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\VerisFlow.LayParser.Core.0.1.0-preview.1\lib\netstandard2.0\VerisFlow.LayParser.Core.dll</HintPath>
-    </Reference>
     <Reference Include="WindowsBase" />
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
@@ -80,6 +77,9 @@
     <Page Include="AboutBox.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="DeckHierarchyWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -90,6 +90,9 @@
     <Compile Include="App.xaml.cs">
       <DependentUpon>App.xaml</DependentUpon>
       <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="DeckHierarchyWindow.xaml.cs">
+      <DependentUpon>DeckHierarchyWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
@@ -115,7 +118,6 @@
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
     <None Include=".editorconfig" />
-    <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
@@ -139,5 +141,14 @@
       <Install>false</Install>
     </BootstrapperPackage>
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\VerisFlow.LayParser.Core\VerisFlow.LayParser.Core.csproj">
+      <Project>{a87ae94a-e4ae-aec5-c00e-d0c46676eb4d}</Project>
+      <Name>VerisFlow.LayParser.Core</Name>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- Dummy target to prevent MSB4057 during dotnet pack -->
+  <Target Name="Pack">
+  </Target>
 </Project>
