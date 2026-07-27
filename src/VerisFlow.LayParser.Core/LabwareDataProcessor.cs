@@ -1,5 +1,9 @@
 ﻿using System.Globalization;
 using System.Text.RegularExpressions;
+using System.IO;
+using System;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace VerisFlow.LayParser.Core
 {
@@ -29,7 +33,7 @@ namespace VerisFlow.LayParser.Core
                 double finalZ = rawLabware.ZTrans;
 
                 var labwareType = LabwareType.Unknown; // Default value
-                string extension = Path.GetExtension(rawLabware.FilePath)?.ToLowerInvariant() ?? string.Empty   ;
+                string extension = Path.GetExtension(rawLabware.FilePath)?.ToLowerInvariant() ?? string.Empty;
 
                 switch (extension)
                 {
@@ -62,6 +66,44 @@ namespace VerisFlow.LayParser.Core
 
                 var template = string.Equals(rawLabware.Template, "default", StringComparison.OrdinalIgnoreCase) ? "" : rawLabware.Template;
 
+                ContainerProperties? containerProperties = null;
+                if (!string.IsNullOrEmpty(properties.CntrFile) && File.Exists(properties.CntrFile))
+                {
+                    containerProperties = ReadContainerProperties(properties.CntrFile);
+                }
+
+                bool zCalculationIncomplete = false;
+                string validationWarning = string.Empty;
+
+                // Handle missing BaseMM dependency gracefully without crashing
+                if (rawLabware.ZTransValue == 0)
+                {
+                    if (containerProperties != null)
+                    {
+                        finalZ += containerProperties.BaseMM;
+                    }
+                    else
+                    {
+                        zCalculationIncomplete = true;
+                        validationWarning = FormattableString.Invariant($"Critical physics warning: ZTransValue is 0 for Labware '{rawLabware.Id}', but the container file is missing or unreadable. BaseMM could not be applied. FinalZ is likely incorrect and unsafe for physical execution.");
+                        Console.WriteLine(validationWarning);
+                    }
+                }
+                else if (rawLabware.ZTransValue == 1)
+                {
+                    if (containerProperties != null)
+                    {
+                        finalZ += properties.CntrBase;
+                        finalZ += containerProperties.BaseMM;
+                    }
+                    else
+                    {
+                        zCalculationIncomplete = true;
+                        validationWarning = FormattableString.Invariant($"Critical physics warning: ZTransValue is 0 for Labware '{rawLabware.Id}', but the container file is missing or unreadable. BaseMM could not be applied. FinalZ is likely incorrect and unsafe for physical execution.");
+                        Console.WriteLine(validationWarning);
+                    }
+                }
+
                 return new ProcessedLabwareInfo
                 {
                     Index = rawLabware.Index,
@@ -78,7 +120,10 @@ namespace VerisFlow.LayParser.Core
                     Column = column,
                     Row = row,
                     AlphaIndex = alphaIndex,
-                    TipRack = isTipRack
+                    TipRack = isTipRack,
+                    ContainerProperties = containerProperties,
+                    IsZCalculationIncomplete = zCalculationIncomplete,
+                    ValidationWarning = validationWarning
                 };
             }).ToList();
         }
@@ -133,7 +178,7 @@ namespace VerisFlow.LayParser.Core
                 var ixIndexMatch = Regex.Match(content, @"\bIX\.Index[\s\x00-\x1F\x7F]+([-\d\.]+)");
                 if (ixIndexMatch.Success)
                 {
-                    if(int.TryParse(ixIndexMatch.Groups[1].Value, out int ixIndex))
+                    if (int.TryParse(ixIndexMatch.Groups[1].Value, out int ixIndex))
                     {
                         properties.IxIndex = ixIndex;
                     }
@@ -168,6 +213,17 @@ namespace VerisFlow.LayParser.Core
                     }
                 }
 
+                // Extract Cntr.1.file path handling potential control characters and quotes
+                var cntrFileMatch = Regex.Match(content, @"\bCntr\.1\.file[\s\S]([^\x00-\x1F\x7F]+)");
+                if (cntrFileMatch.Success)
+                {
+                    string rawPath = cntrFileMatch.Groups[1].Value.Trim();
+                    if (!string.IsNullOrEmpty(rawPath))
+                    {
+                        properties.CntrFile = Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(DeckLayoutParser.HamiltonLabwareBasePath, rawPath);
+                    }
+                }
+
                 return properties;
             }
             catch (Exception ex)
@@ -176,6 +232,81 @@ namespace VerisFlow.LayParser.Core
                 Console.WriteLine($"Could not read properties from {filePath}: {ex.Message}");
                 return properties;
             }
+        }
+
+        /// <summary>
+        /// Reads the content of a container file to extract key properties dynamically.
+        /// </summary>
+        /// <param name="filePath">The full path to the container file (.ctr).</param>
+        /// <returns>A ContainerProperties object containing the extracted values.</returns>
+        private static ContainerProperties ReadContainerProperties(string filePath)
+        {
+            var properties = new ContainerProperties();
+
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            {
+                Console.WriteLine($"Container file not found: {filePath}");
+                return properties;
+            }
+
+            try
+            {
+                string content = File.ReadAllText(filePath);
+
+                properties.DimDx = ExtractDoubleFromContent(content, @"\bDim\.Dx[\s\x00-\x1F\x7F]+([-\d\.]+)");
+                properties.DimDy = ExtractDoubleFromContent(content, @"\bDim\.Dy[\s\x00-\x1F\x7F]+([-\d\.]+)");
+                properties.BaseMM = ExtractDoubleFromContent(content, @"\bBaseMM[\s\x00-\x1F\x7F]+([-\d\.]+)");
+
+                var segmentsMatch = Regex.Match(content, @"\bSegments[\s\x00-\x1F\x7F]+(\d+)");
+                if (segmentsMatch.Success && int.TryParse(segmentsMatch.Groups[1].Value, out int segmentsCount))
+                {
+                    properties.SegmentsCount = segmentsCount;
+
+                    for (int i = 1; i <= segmentsCount; i++)
+                    {
+                        var segment = new ContainerSegment { Index = i };
+
+                        segment.Dx = ExtractDoubleFromContent(content, $@"\b{i}\.DX[\s\x00-\x1F\x7F]+([-\d\.]+)");
+                        segment.Dy = ExtractDoubleFromContent(content, $@"\b{i}\.DY[\s\x00-\x1F\x7F]+([-\d\.]+)");
+                        segment.Dz = ExtractDoubleFromContent(content, $@"\b{i}\.DZ[\s\x00-\x1F\x7F]+([-\d\.]+)");
+                        segment.Max = ExtractDoubleFromContent(content, $@"\b{i}\.Max[\s\x00-\x1F\x7F]+([-\d\.]+)");
+                        segment.Min = ExtractDoubleFromContent(content, $@"\b{i}\.Min[\s\x00-\x1F\x7F]+([-\d\.]+)");
+
+                        var shapeMatch = Regex.Match(content, $@"\b{i}\.Shape[\s\x00-\x1F\x7F]+(\d+)");
+                        if (shapeMatch.Success && int.TryParse(shapeMatch.Groups[1].Value, out int shape))
+                        {
+                            segment.Shape = shape;
+                        }
+
+                        var eqnMatch = Regex.Match(content, $@"\b{i}\.EqnOfVol[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)");
+                        if (eqnMatch.Success)
+                        {
+                            segment.EqnOfVol = eqnMatch.Groups[1].Value;
+                        }
+
+                        properties.Segments.Add(segment);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Could not read properties from container file {filePath}: {ex.Message}");
+            }
+
+            return properties;
+        }
+
+        /// <summary>
+        /// Helper method to cleanly extract a double value using a regex pattern.
+        /// </summary>
+        private static double ExtractDoubleFromContent(string content, string pattern)
+        {
+            var match = Regex.Match(content, pattern);
+            if (match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double result))
+            {
+                return result;
+            }
+            return 0.0;
         }
     }
 }

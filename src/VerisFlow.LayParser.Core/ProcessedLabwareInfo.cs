@@ -33,5 +33,8 @@
         public int Row { get; set; }
         public bool AlphaIndex { get; set; }
         public bool TipRack { get; set; }
+        public ContainerProperties? ContainerProperties { get; set; }
+        public bool IsZCalculationIncomplete { get; set; }
+        public string ValidationWarning { get; set; } = string.Empty;
     }
 }

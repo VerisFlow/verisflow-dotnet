@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using System.Collections.Generic;
 
 namespace VerisFlow.LayParser.Core
 {
@@ -54,5 +55,33 @@ namespace VerisFlow.LayParser.Core
         public int Columns { get; set; }
         public int IxIndex { get; set; }
         public double CntrBase { get; set; }
+        public string CntrFile { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Represents a specific volumetric segment within a container.
+    /// </summary>
+    public class ContainerSegment
+    {
+        public int Index { get; set; }
+        public double Dx { get; set; }
+        public double Dy { get; set; }
+        public double Dz { get; set; }
+        public string EqnOfVol { get; set; } = string.Empty;
+        public double Max { get; set; }
+        public double Min { get; set; }
+        public int Shape { get; set; }
+    }
+
+    /// <summary>
+    /// A data class to store properties extracted from a container file.
+    /// </summary>
+    public class ContainerProperties
+    {
+        public double DimDx { get; set; }
+        public double DimDy { get; set; }
+        public double BaseMM { get; set; }
+        public int SegmentsCount { get; set; }
+        public List<ContainerSegment> Segments { get; set; } = new List<ContainerSegment>();
     }
 }

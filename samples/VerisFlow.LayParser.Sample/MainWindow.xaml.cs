@@ -103,6 +103,18 @@ namespace VerisFlow.VenusDeckParser.Desktop
         }
 
         /// <summary>
+        /// Opens the secondary window to display labware in a hierarchical view with X-axis filtering.
+        /// </summary>
+        private void OpenHierarchyButton_Click(object sender, RoutedEventArgs e)
+        {
+            var hierarchyWindow = new DeckHierarchyWindow(new List<ProcessedLabwareInfo>(ProcessedLabwareData))
+            {
+                Owner = this
+            };
+            hierarchyWindow.Show();
+        }
+
+        /// <summary>
         /// Generates the detailed Markdown report with the final calculated labware information.
         /// </summary>
         /// <param name="deckLayoutFile">The original file path used as a reference in the report.</param>

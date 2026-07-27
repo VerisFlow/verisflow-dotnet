@@ -5,7 +5,7 @@ namespace VerisFlow.LayParser.Core
 {
     public static class DeckLayoutParser
     {
-        private const string HamiltonLabwareBasePath = @"C:\Program Files (x86)\HAMILTON\LabWare\";
+        public const string HamiltonLabwareBasePath = @"C:\Program Files (x86)\HAMILTON\LabWare\";
 
         /// <summary>
         /// Parses a deck layout file to extract detailed labware information based on specific rules.
