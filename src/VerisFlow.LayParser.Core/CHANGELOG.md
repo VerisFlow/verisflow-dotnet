@@ -5,6 +5,20 @@ All notable changes to the `VerisFlow.LayParser.Core` package will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-27
+
+### Added
+
+* Introduced `ContainerSegment` and `ContainerProperties` models to represent and transport highly dynamic, multi-segment container configurations from `.ctr` files.
+
+* Implemented dynamic segment parsing to iteratively extract dimensions (Dx, Dy, Dz), volumetric equations (`EqnOfVol`), and geometric boundaries (Max/Min depth, Shape) from containers.
+
+* Added `IsZCalculationIncomplete` and `ValidationWarning` safety flags to `ProcessedLabwareInfo` to gracefully surface missing physical dependencies without crashing the parsing pipeline.
+
+### Changed
+
+* Upgraded Z-axis (`FinalZ`) calculation logic to automatically incorporate a container's `BaseMM` property when `ZTransValue` evaluates to 0 or 1.
+
 ## [0.1.0] - 2026-07-25
 
 ### Added
