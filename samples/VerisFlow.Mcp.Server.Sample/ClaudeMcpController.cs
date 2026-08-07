@@ -77,10 +77,11 @@ public class ClaudeMcpController : ControllerBase
         var azureTokenUrl = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
 
         // Whitelist of permitted parameters for the proxy to forward.
+        // Ensure client_secret is included in the whitelist to support standard confidential clients.
         var allowedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "client_id", "grant_type", "code", "redirect_uri", "code_verifier", "scope"
-        };
+    {
+        "client_id", "client_secret", "grant_type", "code", "redirect_uri", "code_verifier", "scope"
+    };
 
         var formDict = Request.Form
             .Where(x => allowedKeys.Contains(x.Key))
@@ -92,9 +93,18 @@ public class ClaudeMcpController : ControllerBase
         }
 
         var client = _httpClientFactory.CreateClient();
-        var content = new FormUrlEncodedContent(formDict);
+        var requestMessage = new HttpRequestMessage(HttpMethod.Post, azureTokenUrl)
+        {
+            Content = new FormUrlEncodedContent(formDict)
+        };
 
-        var response = await client.PostAsync(azureTokenUrl, content);
+        // Forward the Authorization header if provided by the client (e.g., HTTP Basic Auth)
+        if (Request.Headers.TryGetValue("Authorization", out var authHeader))
+        {
+            requestMessage.Headers.TryAddWithoutValidation("Authorization", authHeader.ToString());
+        }
+
+        var response = await client.SendAsync(requestMessage);
         var responseData = await response.Content.ReadAsStringAsync();
 
         return Content(responseData, "application/json");
