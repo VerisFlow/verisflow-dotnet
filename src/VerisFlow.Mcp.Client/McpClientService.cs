@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace VerisFlow.Mcp.Client;
@@ -43,8 +44,11 @@ public partial class McpClientService : IAsyncDisposable
         ILogger<McpClientService> logger,
         Func<Task<string?>>? accessTokenProvider = null)
     {
-        _dispatcher = dispatcher;
-        _logger = logger;
+        if (string.IsNullOrWhiteSpace(relayUrl))
+            throw new ArgumentException("Relay URL cannot be null or whitespace.", nameof(relayUrl));
+
+        _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var hubBuilder = new HubConnectionBuilder();
 
@@ -69,11 +73,31 @@ public partial class McpClientService : IAsyncDisposable
         {
             LogAiRequestedToolExecution(toolName);
 
-            var (resultJson, isError) = await _dispatcher.DispatchAsync(toolName, argsJson);
+            string resultJson;
+            bool isError;
+
+            try
+            {
+                (resultJson, isError) = await _dispatcher.DispatchAsync(toolName, argsJson);
+            }
+            catch (Exception ex)
+            {
+                // Ensure unhandled dispatcher failures still yield a valid JSON error payload back to the relay
+                var errorPayload = new { error = ex.Message, stackTrace = ex.StackTrace };
+                resultJson = JsonSerializer.Serialize(errorPayload);
+                isError = true;
+            }
 
             LogToolExecutionFinished();
 
-            await _connection.InvokeAsync(McpProtocolMethods.SubmitToolResultAsync, requestId, resultJson, isError);
+            try
+            {
+                await _connection.InvokeAsync(McpProtocolMethods.SubmitToolResultAsync, requestId, resultJson, isError);
+            }
+            catch (Exception ex)
+            {
+                LogFailedToSubmitToolExecutionResult(ex, requestId);
+            }
         });
     }
 
@@ -118,4 +142,7 @@ public partial class McpClientService : IAsyncDisposable
 
     [LoggerMessage(EventId = 4, Level = LogLevel.Information, Message = "Disconnected from Cloud Relay.")]
     private partial void LogDisconnected();
+
+    [LoggerMessage(EventId = 5, Level = LogLevel.Error, Message = "Failed to submit tool execution result for request ID {RequestId}.")]
+    private partial void LogFailedToSubmitToolExecutionResult(Exception ex, string requestId);
 }
