@@ -77,6 +77,16 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
     private bool _isCleaningUp;
 
     /// <summary>
+    /// Indicates whether a connection attempt is currently in progress.
+    /// </summary>
+    private bool _isConnecting;
+
+    /// <summary>
+    /// Cancellation token source for canceling ongoing connection and authentication attempts.
+    /// </summary>
+    private CancellationTokenSource? _connectCts;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="MainWindow"/> class, configuring application services, MSAL authentication, and environment settings.
     /// </summary>
     public MainWindow()
@@ -178,7 +188,7 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
     /// <param name="e">The mouse button event arguments.</param>
     private void ToggleSwitch_Click(object sender, MouseButtonEventArgs e)
     {
-        if (_isConnected) return;
+        if (_isConnected || _isConnecting) return;
 
         _isProd = !_isProd;
         ApplyToggleVisual(animated: true);
@@ -263,20 +273,24 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
                     });
                 }
 
-                using var authCts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                // Link the active connection cancellation token with a default timeout safeguard
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                using var linkedCts = _connectCts != null
+                    ? CancellationTokenSource.CreateLinkedTokenSource(_connectCts.Token, timeoutCts.Token)
+                    : CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token);
 
                 // Fall back to interactive UI authentication if silent acquisition fails
                 var result = await _msalClient.AcquireTokenInteractive(_scopes)
                     .WithPrompt(Prompt.SelectAccount)
                     .WithParentActivityOrWindow(windowHandle)
                     .WithSystemWebViewOptions(MsalSystemWebViewOptionsFactory.Create())
-                    .ExecuteAsync(authCts.Token);
+                    .ExecuteAsync(linkedCts.Token);
 
                 return result.AccessToken;
             }
             catch (OperationCanceledException)
             {
-                AppendLog("[Auth Error] Interactive authentication timed out or was canceled.");
+                AppendLog("[Auth] Interactive authentication was canceled or timed out.");
                 return null;
             }
             catch (Exception ex)
@@ -294,12 +308,22 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
     /// <param name="e">The routed event arguments.</param>
     private async void BtnToggle_Click(object sender, RoutedEventArgs e)
     {
-        BtnToggle.IsEnabled = false;
+        // Cancel ongoing connection attempt if user clicks Cancel button
+        if (_isConnecting)
+        {
+            _connectCts?.Cancel();
+            return;
+        }
+
         ToggleTrack.IsEnabled = false;
 
         if (!_isConnected)
         {
-            BtnToggle.Content = "Connecting...";
+            _isConnecting = true;
+            _connectCts?.Dispose();
+            _connectCts = new CancellationTokenSource();
+
+            BtnToggle.Content = "Cancel";
             TxtStatus.Text = "Status: Connecting...";
             TxtStatus.Foreground = Brushes.Orange;
 
@@ -327,15 +351,24 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
                 TxtStatus.BeginAnimation(OpacityProperty, null);
                 TxtStatus.Opacity = 1;
 
-                AppendLog($"[Connection Error] {ex.Message}");
+                if (ex is not OperationCanceledException)
+                {
+                    AppendLog($"[Connection Error] {ex.Message}");
+                }
+
                 BtnToggle.Content = "Connect to Relay";
                 TxtStatus.Text = "Status: Offline";
                 TxtStatus.Foreground = Brushes.LightGray;
                 ToggleTrack.IsEnabled = true;
             }
+            finally
+            {
+                _isConnecting = false;
+            }
         }
         else
         {
+            BtnToggle.IsEnabled = false;
             BtnToggle.Content = "Disconnecting...";
 
             await _clientService!.StopAsync();
@@ -345,9 +378,8 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
             TxtStatus.Foreground = Brushes.LightGray;
             _isConnected = false;
             ToggleTrack.IsEnabled = true;
+            BtnToggle.IsEnabled = true;
         }
-
-        BtnToggle.IsEnabled = true;
     }
 
     /// <summary>
@@ -370,6 +402,7 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
         }
 
         _isCleaningUp = true;
+        _connectCts?.Cancel();
         BtnToggle.IsEnabled = false;
         ToggleTrack.IsEnabled = false;
         TxtStatus.Text = "Status: Closing...";
@@ -438,6 +471,10 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
     /// </summary>
     public void Dispose()
     {
+        _connectCts?.Cancel();
+        _connectCts?.Dispose();
+        _connectCts = null;
+
         if (_clientService != null)
         {
             try
@@ -465,6 +502,10 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
     /// <returns>A ValueTask representing the asynchronous operation.</returns>
     public async ValueTask DisposeAsync()
     {
+        _connectCts?.Cancel();
+        _connectCts?.Dispose();
+        _connectCts = null;
+
         if (_clientService != null)
         {
             await _clientService.DisposeAsync();
