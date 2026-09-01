@@ -17,7 +17,7 @@ public class McpToolDispatcher : IMcpToolDispatcher
     /// <param name="registry">The tool registry used to look up tool handlers.</param>
     public McpToolDispatcher(IMcpToolRegistry registry)
     {
-        _registry = registry;
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
     }
 
     /// <summary>
@@ -28,12 +28,18 @@ public class McpToolDispatcher : IMcpToolDispatcher
     /// <returns>A tuple containing the response JSON payload and an error flag.</returns>
     public async Task<(string ResultJson, bool IsError)> DispatchAsync(string toolName, string argumentsJson)
     {
+        if (string.IsNullOrWhiteSpace(toolName))
+        {
+            var invalidNameResponse = new { error = "Tool name cannot be empty." };
+            return (JsonSerializer.Serialize(invalidNameResponse), true);
+        }
+
         try
         {
             var handler = _registry.GetTool(toolName);
             if (handler == null)
             {
-                var notFoundResponse = new { error = "Tool not recognized by the local agent." };
+                var notFoundResponse = new { error = $"Tool '{toolName}' is not recognized by the local agent." };
                 return (JsonSerializer.Serialize(notFoundResponse), true);
             }
 
