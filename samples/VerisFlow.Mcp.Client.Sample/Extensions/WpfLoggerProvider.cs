@@ -19,7 +19,7 @@ public class WpfLoggerProvider : ILoggerProvider
     /// <param name="logAction">The delegate executed when a new log message is formatted.</param>
     public WpfLoggerProvider(Action<string> logAction)
     {
-        _logAction = logAction;
+        _logAction = logAction ?? throw new ArgumentNullException(nameof(logAction));
     }
 
     /// <summary>
@@ -87,10 +87,17 @@ public class WpfLoggerProvider : ILoggerProvider
         {
             if (!IsEnabled(logLevel)) return;
 
-            var message = formatter(state, exception);
-            if (!string.IsNullOrEmpty(message))
+            try
             {
-                _logAction(message);
+                var message = formatter(state, exception);
+                if (!string.IsNullOrEmpty(message))
+                {
+                    _logAction(message);
+                }
+            }
+            catch
+            {
+                // Ensure logger formatting failures do not disrupt caller execution flow
             }
         }
     }
