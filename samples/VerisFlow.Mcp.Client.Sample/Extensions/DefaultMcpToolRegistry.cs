@@ -1,6 +1,9 @@
-﻿using System;
+﻿using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using VerisFlow.Mcp.Client;
 
 namespace VerisFlow.Mcp.Client.Sample;
@@ -11,17 +14,53 @@ namespace VerisFlow.Mcp.Client.Sample;
 public class DefaultMcpToolRegistry : IMcpToolRegistry
 {
     /// <summary>
-    /// Maps tool names to their corresponding handlers using case-insensitive key comparison.
+    /// Maps tool names to their corresponding handler types using case-insensitive comparison.
     /// </summary>
-    private readonly Dictionary<string, IMcpToolHandler> _handlers;
+    private readonly Dictionary<string, Type> _toolTypeMap;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="DefaultMcpToolRegistry"/> class with the specified collection of tool handlers.
+    /// Service provider used for on-demand resolution of tool handlers.
     /// </summary>
-    /// <param name="handlers">An enumerable collection of tool handlers to register in the registry.</param>
-    public DefaultMcpToolRegistry(IEnumerable<IMcpToolHandler> handlers)
+    private readonly IServiceProvider _serviceProvider;
+
+    /// <summary>
+    /// Cache of instantiated tool handlers to avoid duplicate creation.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, IMcpToolHandler> _handlers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DefaultMcpToolRegistry"/> class with lazy resolution support.
+    /// </summary>
+    /// <param name="serviceProvider">The service provider instance used to resolve handler dependencies on demand.</param>
+    public DefaultMcpToolRegistry(IServiceProvider serviceProvider)
     {
-        _handlers = handlers.ToDictionary(h => h.Name, h => h, StringComparer.OrdinalIgnoreCase);
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+
+        var handlerType = typeof(IMcpToolHandler);
+        var implementations = typeof(McpToolHandlerBase).Assembly
+            .GetTypes()
+            .Where(t => handlerType.IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface);
+
+        _toolTypeMap = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var impl in implementations)
+        {
+            try
+            {
+                // Extract tool name without executing target constructor dependencies or initializing hardware services
+                var uninitialized = (IMcpToolHandler)RuntimeHelpers.GetUninitializedObject(impl);
+                var toolName = uninitialized.Name;
+
+                if (!string.IsNullOrWhiteSpace(toolName))
+                {
+                    _toolTypeMap[toolName] = impl;
+                }
+            }
+            catch
+            {
+                // Suppress reflection inspection errors for non-standard handlers
+            }
+        }
     }
 
     /// <summary>
@@ -31,7 +70,17 @@ public class DefaultMcpToolRegistry : IMcpToolRegistry
     /// <returns>The matching <see cref="IMcpToolHandler"/> instance if found; otherwise, <c>null</c>.</returns>
     public IMcpToolHandler? GetTool(string toolName)
     {
-        _handlers.TryGetValue(toolName, out var handler);
-        return handler;
+        if (string.IsNullOrWhiteSpace(toolName))
+        {
+            return null;
+        }
+
+        if (!_toolTypeMap.TryGetValue(toolName, out var handlerType))
+        {
+            return null;
+        }
+
+        return _handlers.GetOrAdd(toolName, _ =>
+            (IMcpToolHandler)ActivatorUtilities.GetServiceOrCreateInstance(_serviceProvider, handlerType));
     }
 }
