@@ -10,6 +10,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using TraceLogic.Core;
 using VerisFlow.Mcp.Client;
 using VerisFlow.VenusAuto.Core.Contracts;
@@ -83,14 +84,7 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
         services.AddLogging(configure =>
         {
             configure.AddDebug().SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Debug);
-            configure.AddProvider(new WpfLoggerProvider(message =>
-            {
-                Dispatcher.Invoke(() =>
-                {
-                    TxtLog.AppendText($"{DateTime.Now:HH:mm:ss} {message}\n");
-                    TxtLog.ScrollToEnd();
-                });
-            }));
+            configure.AddProvider(new WpfLoggerProvider(AppendLog));
         });
 
         services.AddVenusAutomation(config);
@@ -125,6 +119,25 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
         ApplyToggleVisual(animated: false);
 
         InitializeMcpClient();
+    }
+
+    /// <summary>
+    /// Appends a log line to the log textbox in a non-blocking, thread-safe manner.
+    /// </summary>
+    /// <param name="message">The raw message to append.</param>
+    private void AppendLog(string message)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        // Use asynchronous dispatch with background priority to prevent deadlocks during connect/disconnect sequences
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            TxtLog.AppendText($"{DateTime.Now:HH:mm:ss} {message}\n");
+            TxtLog.ScrollToEnd();
+        });
     }
 
     /// <summary>
@@ -233,11 +246,7 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Dispatcher.Invoke(() =>
-                {
-                    TxtLog.AppendText($"{DateTime.Now:HH:mm:ss} [Auth Error] {ex.Message}\n");
-                    TxtLog.ScrollToEnd();
-                });
+                AppendLog($"[Auth Error] {ex.Message}");
                 return null;
             }
         }
@@ -283,7 +292,7 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
                 TxtStatus.BeginAnimation(OpacityProperty, null);
                 TxtStatus.Opacity = 1;
 
-                TxtLog.AppendText($"{DateTime.Now:HH:mm:ss} [Connection Error] {ex.Message}\n");
+                AppendLog($"[Connection Error] {ex.Message}");
                 BtnToggle.Content = "Connect to Relay";
                 TxtStatus.Text = "Status: Offline";
                 TxtStatus.Foreground = Brushes.LightGray;
