@@ -3,8 +3,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Identity.Client;
 using System;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -62,6 +64,16 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
     /// Indicates whether the active target environment is production.
     /// </summary>
     private bool _isProd;
+
+    /// <summary>
+    /// Indicates whether the asynchronous teardown cleanup has fully completed.
+    /// </summary>
+    private bool _isCleanedUp;
+
+    /// <summary>
+    /// Indicates whether the application is currently executing teardown cleanup.
+    /// </summary>
+    private bool _isCleaningUp;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MainWindow"/> class, configuring application services, MSAL authentication, and environment settings.
@@ -316,15 +328,85 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Overrides window closing logic to release resources asynchronously before closing.
+    /// Intercepts window closing to perform graceful asynchronous disconnection and resource disposal before teardown.
+    /// </summary>
+    /// <param name="e">The cancel event arguments.</param>
+    protected override async void OnClosing(CancelEventArgs e)
+    {
+        if (_isCleanedUp)
+        {
+            base.OnClosing(e);
+            return;
+        }
+
+        e.Cancel = true;
+
+        if (_isCleaningUp)
+        {
+            return;
+        }
+
+        _isCleaningUp = true;
+        BtnToggle.IsEnabled = false;
+        ToggleTrack.IsEnabled = false;
+        TxtStatus.Text = "Status: Closing...";
+        TxtStatus.Foreground = Brushes.Orange;
+
+        try
+        {
+            // Execute graceful disconnection and disposal with a safety timeout to prevent shutdown hanging
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await Task.Run(async () =>
+            {
+                if (_clientService != null)
+                {
+                    try
+                    {
+                        await _clientService.DisposeAsync();
+                    }
+                    catch
+                    {
+                        // Suppress transport disposal errors during exit
+                    }
+                    _clientService = null;
+                }
+
+                if (_serviceProvider is IAsyncDisposable asyncDisposable)
+                {
+                    try
+                    {
+                        await asyncDisposable.DisposeAsync();
+                    }
+                    catch
+                    {
+                        // Suppress container disposal errors during exit
+                    }
+                }
+                else if (_serviceProvider is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }, cts.Token);
+        }
+        catch
+        {
+            // Allow close operation to proceed even if timeout occurs
+        }
+        finally
+        {
+            _isCleanedUp = true;
+            _isCleaningUp = false;
+            Close();
+        }
+    }
+
+    /// <summary>
+    /// Overrides window closing logic to release resources synchronously upon final window closure.
     /// </summary>
     /// <param name="e">The event arguments.</param>
-    protected override async void OnClosed(EventArgs e)
+    protected override void OnClosed(EventArgs e)
     {
-        if (_clientService != null)
-        {
-            await _clientService.DisposeAsync();
-        }
+        Dispose();
         base.OnClosed(e);
     }
 
@@ -333,6 +415,24 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
     /// </summary>
     public void Dispose()
     {
+        if (_clientService != null)
+        {
+            try
+            {
+                _clientService.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Suppress disposal errors during synchronous fallback
+            }
+            _clientService = null;
+        }
+
+        if (_serviceProvider is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
+
         GC.SuppressFinalize(this);
     }
 
@@ -346,6 +446,15 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
         {
             await _clientService.DisposeAsync();
             _clientService = null;
+        }
+
+        if (_serviceProvider is IAsyncDisposable asyncDisposable)
+        {
+            await asyncDisposable.DisposeAsync();
+        }
+        else if (_serviceProvider is IDisposable disposable)
+        {
+            disposable.Dispose();
         }
 
         GC.SuppressFinalize(this);
