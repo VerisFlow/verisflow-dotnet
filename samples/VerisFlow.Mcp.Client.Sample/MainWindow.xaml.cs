@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -250,11 +251,32 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
         {
             try
             {
+                // Obtain window handle to anchor interactive browser dialog directly to current WPF window
+                IntPtr windowHandle = IntPtr.Zero;
+                if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+                {
+                    windowHandle = Dispatcher.Invoke(() =>
+                    {
+                        Activate();
+                        Focus();
+                        return new WindowInteropHelper(this).Handle;
+                    });
+                }
+
+                using var authCts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
                 // Fall back to interactive UI authentication if silent acquisition fails
                 var result = await _msalClient.AcquireTokenInteractive(_scopes)
                     .WithPrompt(Prompt.SelectAccount)
-                    .ExecuteAsync();
+                    .WithParentActivityOrWindow(windowHandle)
+                    .ExecuteAsync(authCts.Token);
+
                 return result.AccessToken;
+            }
+            catch (OperationCanceledException)
+            {
+                AppendLog("[Auth Error] Interactive authentication timed out or was canceled.");
+                return null;
             }
             catch (Exception ex)
             {
