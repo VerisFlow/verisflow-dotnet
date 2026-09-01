@@ -23,7 +23,7 @@ public static class McpServiceCollectionExtensions
 
         foreach (var implementation in handlerImplementations)
         {
-            services.AddTransient(handlerType, implementation);
+            services.AddTransient(implementation);
         }
 
         return services;
