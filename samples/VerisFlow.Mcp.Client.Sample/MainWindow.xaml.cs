@@ -269,6 +269,7 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
                 var result = await _msalClient.AcquireTokenInteractive(_scopes)
                     .WithPrompt(Prompt.SelectAccount)
                     .WithParentActivityOrWindow(windowHandle)
+                    .WithSystemWebViewOptions(MsalSystemWebViewOptionsFactory.Create())
                     .ExecuteAsync(authCts.Token);
 
                 return result.AccessToken;
