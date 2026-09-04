@@ -134,6 +134,7 @@ public partial class MainWindow : Window, IDisposable, IAsyncDisposable
         _msalClient = PublicClientApplicationBuilder.Create(clientId)
             .WithAuthority(AzureCloudInstance.AzurePublic, tenantId)
             .WithDefaultRedirectUri()
+            .WithHttpClientFactory(new IPv4OnlyMsalHttpClientFactory())
             .Build();
 
         _isProd = defaultEnv.Equals("Prod", StringComparison.OrdinalIgnoreCase);
