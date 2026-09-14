@@ -2,7 +2,7 @@
 
   <PropertyGroup>
       <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
-      <Version>0.1.0</Version>
+      <Version>0.3.0</Version>
       
       <!-- Package Identification -->
       <PackageId>VerisFlow.LayParser.Core</PackageId>

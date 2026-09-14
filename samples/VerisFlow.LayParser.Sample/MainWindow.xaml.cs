@@ -2,7 +2,9 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -73,10 +75,11 @@ namespace VerisFlow.VenusDeckParser.Desktop
                 {
                     var raw = DeckLayoutParser.GetLabwareInfo(deckLayoutFile);
                     var processed = LabwareDataProcessor.Process(raw);
-                    var markdown = GenerateMarkdown(deckLayoutFile, processed);
+                    var sequences = DeckSequenceParser.GetSequenceInfo(deckLayoutFile);
+                    var markdown = GenerateMarkdown(deckLayoutFile, processed, sequences);
 
                     // Use the synchronous method INSIDE the background task.
-                    File.WriteAllText(markdownFilePath, markdown);
+                    File.WriteAllText(markdownFilePath, markdown, Encoding.UTF8);
 
                     return processed; // Only return the data needed by the UI thread.
                 });
@@ -122,44 +125,134 @@ namespace VerisFlow.VenusDeckParser.Desktop
         /// <returns>A string containing the formatted markdown report.</returns>
         private string GenerateMarkdown(string deckLayoutFile, List<ProcessedLabwareInfo> processedData)
         {
+            return GenerateMarkdown(deckLayoutFile, processedData, new List<SequenceInfo>());
+        }
+
+        /// <summary>
+        /// Generates the comprehensive Markdown report containing both processed labware and sequence metadata.
+        /// Appends structured Sequence information below the Labware section for downstream machine readability.
+        /// </summary>
+        /// <param name="deckLayoutFile">The source layout file path.</param>
+        /// <param name="processedData">The processed labware collection.</param>
+        /// <param name="sequences">The extracted sequence collections with nested matrices.</param>
+        /// <returns>A formatted markdown document string.</returns>
+        private string GenerateMarkdown(string deckLayoutFile, List<ProcessedLabwareInfo> processedData, List<SequenceInfo> sequences)
+        {
             var sb = new StringBuilder();
 
             sb.AppendLine($"# Deck Layout Report for {deckLayoutFile}");
             sb.AppendLine();
             sb.AppendLine($"**Generated on:** {DateTime.Now}");
             sb.AppendLine();
+
             sb.AppendLine("## Processed Labware Information");
             sb.AppendLine();
 
-            if (processedData.Count > 0)
+            if (processedData != null && processedData.Count > 0)
             {
-                sb.AppendLine($"**Total Labware Instances:** {processedData.Count}");
+                sb.AppendLine(FormattableString.Invariant($"**Total Labware Instances:** {processedData.Count}"));
                 sb.AppendLine();
 
                 // Markdown Table Header
-                sb.AppendLine("| # | ID | Type | Template | X | Y | Dx | Dy | Column | Row | TipRack | AlphaIndex |");
-                sb.AppendLine("|---|----|------|----------|---|---|----|----|--------|-----|---------|------------|");
+                sb.AppendLine("| # | ID | Type | Template | X | Y | Z | Dx | Dy | Column | Row | TipRack | AlphaIndex |");
+                sb.AppendLine("|---|----|------|----------|---|---|---|----|----|--------|-----|---------|------------|");
 
                 // Table Rows
                 foreach (var labware in processedData)
                 {
-                    sb.AppendLine($"| {labware.Index} " +
-                                  $"| `{labware.Id}` " +
-                                  $"| {labware.LabwareType} " +
-                                  $"| {labware.Template} " +
-                                  $"| {labware.FinalX:F3} " +
-                                  $"| {labware.FinalY:F3} " +
-                                  $"| {labware.Dx:F3} " +
-                                  $"| {labware.Dy:F3} " +
-                                  $"| {labware.Column} " +
-                                  $"| {labware.Row} " +
-                                  $"| {labware.TipRack} " +
-                                  $"| {labware.AlphaIndex} |");
+                    sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
+                        "| {0} | `{1}` | {2} | {3} | {4:F3} | {5:F3} | {6:F3} | {7:F3} | {8:F3} | {9} | {10} | {11} | {12} |",
+                        labware.Index,
+                        labware.Id,
+                        labware.LabwareType,
+                        labware.Template,
+                        labware.FinalX,
+                        labware.FinalY,
+                        labware.FinalZ,
+                        labware.Dx,
+                        labware.Dy,
+                        labware.Column,
+                        labware.Row,
+                        labware.TipRack,
+                        labware.AlphaIndex));
                 }
             }
             else
             {
                 sb.AppendLine("No labware information could be processed from the file.");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("## Sequence Information");
+            sb.AppendLine();
+
+            if (sequences != null && sequences.Count > 0)
+            {
+                sb.AppendLine(FormattableString.Invariant($"**Total Sequences Defined:** {sequences.Count}"));
+                sb.AppendLine();
+
+                sb.AppendLine("| # | Sequence Name | Total Count | ReadOnly | Rack Count | Target Labwares (ObjId Descending) |");
+                sb.AppendLine("|---|---------------|-------------|----------|------------|-----------------------------------|");
+
+                foreach (var seq in sequences)
+                {
+                    string targetRacksSummary = seq.Matrices.Count > 0
+                        ? string.Join(", ", seq.Matrices.Select(m => FormattableString.Invariant($"`{m.ObjId}` ({m.TotalWells})")))
+                        : "None";
+
+                    sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
+                        "| {0} | `{1}` | {2} | {3} | {4} | {5} |",
+                        seq.Index,
+                        seq.Name,
+                        seq.TotalCount,
+                        seq.ReadOnly,
+                        seq.Matrices.Count,
+                        targetRacksSummary));
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("### Sequence Detail Matrices");
+                sb.AppendLine();
+
+                foreach (var seq in sequences)
+                {
+                    sb.AppendLine(FormattableString.Invariant($"#### Sequence #{seq.Index}: `{seq.Name}`"));
+                    sb.AppendLine();
+                    sb.AppendLine(FormattableString.Invariant($"- Total Points: {seq.TotalCount}"));
+                    sb.AppendLine(FormattableString.Invariant($"- Read Only: {seq.ReadOnly}"));
+                    sb.AppendLine(FormattableString.Invariant($"- Rack Matrices: {seq.Matrices.Count}"));
+                    sb.AppendLine();
+
+                    if (seq.Matrices.Count > 0)
+                    {
+                        sb.AppendLine("| Labware (ObjId) | Seq Index | PosId | Row | Column |");
+                        sb.AppendLine("|-----------------|-----------|-------|-----|--------|");
+
+                        foreach (var matrix in seq.Matrices)
+                        {
+                            foreach (var pos in matrix.Positions)
+                            {
+                                sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
+                                    "| `{0}` | {1} | `{2}` | {3} | {4} |",
+                                    matrix.ObjId,
+                                    pos.SequenceIndex,
+                                    pos.PosId,
+                                    pos.RowIndex,
+                                    pos.ColumnIndex));
+                            }
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine("_No target positions defined for this sequence._");
+                    }
+
+                    sb.AppendLine();
+                }
+            }
+            else
+            {
+                sb.AppendLine("No sequence information found in this layout file.");
             }
 
             return sb.ToString();
