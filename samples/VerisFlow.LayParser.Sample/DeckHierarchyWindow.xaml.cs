@@ -12,12 +12,23 @@ namespace VerisFlow.VenusDeckParser.Desktop
         private readonly List<ProcessedLabwareInfo> _sourceData;
         private ObservableCollection<HierarchyNodeViewModel> _treeNodes;
 
-        public DeckHierarchyWindow(List<ProcessedLabwareInfo> sourceData)
+        public DeckHierarchyWindow(List<ProcessedLabwareInfo> sourceData) : this(sourceData, string.Empty)
+        {
+        }
+
+        public DeckHierarchyWindow(List<ProcessedLabwareInfo> sourceData, string instrumentName)
         {
             InitializeComponent();
             _sourceData = sourceData;
             _treeNodes = new ObservableCollection<HierarchyNodeViewModel>();
             HierarchyTreeView.ItemsSource = _treeNodes;
+
+            if (!string.IsNullOrWhiteSpace(instrumentName))
+            {
+                Title = $"Deck Layout Hierarchy - {instrumentName}";
+                InstrumentHeaderTextBlock.Text = $"Instrument: {instrumentName}";
+                InstrumentHeaderBadge.Visibility = Visibility.Visible;
+            }
 
             BuildHierarchy(double.MinValue, double.MaxValue);
         }

@@ -71,27 +71,41 @@ namespace VerisFlow.VenusDeckParser.Desktop
                 string markdownFilePath = Path.ChangeExtension(deckLayoutFile, ".md");
 
                 // Run all file/CPU-intensive operations on a background thread.
-                var processedData = await Task.Run(() =>
+                var result = await Task.Run(() =>
                 {
-                    var raw = DeckLayoutParser.GetLabwareInfo(deckLayoutFile);
-                    var processed = LabwareDataProcessor.Process(raw);
+                    var deckData = DeckLayoutParser.GetDeckData(deckLayoutFile);
+                    var processed = LabwareDataProcessor.Process(deckData.Labware);
                     var sequences = DeckSequenceParser.GetSequenceInfo(deckLayoutFile);
-                    var markdown = GenerateMarkdown(deckLayoutFile, processed, sequences);
+                    var markdown = GenerateMarkdown(deckLayoutFile, deckData.Instrument, processed, sequences);
 
                     // Use the synchronous method INSIDE the background task.
                     File.WriteAllText(markdownFilePath, markdown, Encoding.UTF8);
 
-                    return processed; // Only return the data needed by the UI thread.
+                    return (deckData.Instrument, ProcessedData: processed);
                 });
+
+                if (!string.IsNullOrWhiteSpace(result.Instrument))
+                {
+                    InstrumentTextBlock.Text = $"Instrument: {result.Instrument}";
+                    InstrumentBadge.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    InstrumentBadge.Visibility = Visibility.Collapsed;
+                }
 
                 // --- Update UI on the UI thread ---
                 ProcessedLabwareData.Clear();
-                foreach (var item in processedData)
+                foreach (var item in result.ProcessedData)
                 {
                     ProcessedLabwareData.Add(item);
                 }
 
-                StatusTextBlock.Text = $"Displayed {processedData.Count} items and saved report to {markdownFilePath}.";
+                string instrumentPrefix = !string.IsNullOrWhiteSpace(result.Instrument)
+                    ? $"[{result.Instrument}] "
+                    : string.Empty;
+
+                StatusTextBlock.Text = $"{instrumentPrefix}Displayed {result.ProcessedData.Count} items and saved report to {markdownFilePath}.";
             }
             catch (Exception ex)
             {
@@ -125,7 +139,7 @@ namespace VerisFlow.VenusDeckParser.Desktop
         /// <returns>A string containing the formatted markdown report.</returns>
         private string GenerateMarkdown(string deckLayoutFile, List<ProcessedLabwareInfo> processedData)
         {
-            return GenerateMarkdown(deckLayoutFile, processedData, new List<SequenceInfo>());
+            return GenerateMarkdown(deckLayoutFile, string.Empty, processedData, new List<SequenceInfo>());
         }
 
         /// <summary>
@@ -138,11 +152,28 @@ namespace VerisFlow.VenusDeckParser.Desktop
         /// <returns>A formatted markdown document string.</returns>
         private string GenerateMarkdown(string deckLayoutFile, List<ProcessedLabwareInfo> processedData, List<SequenceInfo> sequences)
         {
+            return GenerateMarkdown(deckLayoutFile, string.Empty, processedData, sequences);
+        }
+
+        /// <summary>
+        /// Generates the comprehensive Markdown report containing instrument metadata, processed labware, and sequences.
+        /// </summary>
+        /// <param name="deckLayoutFile">The source layout file path.</param>
+        /// <param name="instrument">The instrument model name extracted from layout.</param>
+        /// <param name="processedData">The processed labware collection.</param>
+        /// <param name="sequences">The extracted sequence collections with nested matrices.</param>
+        /// <returns>A formatted markdown document string.</returns>
+        private string GenerateMarkdown(string deckLayoutFile, string instrument, List<ProcessedLabwareInfo> processedData, List<SequenceInfo> sequences)
+        {
             var sb = new StringBuilder();
 
             sb.AppendLine($"# Deck Layout Report for {deckLayoutFile}");
             sb.AppendLine();
             sb.AppendLine($"**Generated on:** {DateTime.Now}");
+            if (!string.IsNullOrWhiteSpace(instrument))
+            {
+                sb.AppendLine($"**Instrument:** `{instrument}`");
+            }
             sb.AppendLine();
 
             sb.AppendLine("## Processed Labware Information");

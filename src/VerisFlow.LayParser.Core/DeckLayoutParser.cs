@@ -1,4 +1,7 @@
-﻿using System.Globalization;
+﻿using System;
+using System.IO;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace VerisFlow.LayParser.Core
@@ -8,13 +11,13 @@ namespace VerisFlow.LayParser.Core
         public const string HamiltonLabwareBasePath = @"C:\Program Files (x86)\HAMILTON\LabWare\";
 
         /// <summary>
-        /// Parses a deck layout file to extract detailed labware information based on specific rules.
+        /// Reads deck layout data from a .lay file, extracting instrument and all labware instances in a single pass.
         /// </summary>
         /// <param name="deckLayoutFilePath">The full path to the .lay file.</param>
-        /// <returns>A list of LabwareInfo objects.</returns>
-        public static List<LabwareInfo> GetLabwareInfo(string deckLayoutFilePath)
+        /// <returns>A DeckData object containing the instrument name and labware list.</returns>
+        public static DeckData GetDeckData(string deckLayoutFilePath)
         {
-            var labwareList = new List<LabwareInfo>();
+            var deckData = new DeckData();
             string content;
             try
             {
@@ -23,22 +26,35 @@ namespace VerisFlow.LayParser.Core
             catch (Exception ex)
             {
                 Console.WriteLine($"Error reading deck layout file: {ex.Message}");
-                return labwareList; // Return empty list on read error
+                return deckData;
             }
 
-            // 1. Get the total number of labware instances
+            // Extract instrument name from the layout content
+            var instMatch = Regex.Match(content, @"\bInstrument[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)");
+            if (instMatch.Success)
+            {
+                deckData.Instrument = instMatch.Groups[1].Value;
+            }
+            else
+            {
+                var headerMatch = Regex.Match(content, @"\bDECKLAY,([^\s\x00-\x1F\x7F,]+)");
+                if (headerMatch.Success)
+                {
+                    deckData.Instrument = headerMatch.Groups[1].Value;
+                }
+            }
+
+            // Extract labware instances
             var countMatch = Regex.Match(content, @"Labware\.Cnt[\s\x00-\x1F\x7F]+(\d+)");
             if (!countMatch.Success || !int.TryParse(countMatch.Groups[1].Value, out int labwareCount))
             {
-                return labwareList; // Return empty if count is not found
+                return deckData;
             }
 
-            // 2. Iterate through each labware instance
             for (int i = 1; i <= labwareCount; i++)
             {
                 var labware = new LabwareInfo { Index = i };
 
-                // 3. Extract each required field using helper methods
                 labware.FilePath = ExtractFilePath(content, i);
                 labware.Id = ExtractStringValue(content, i, "Id");
                 labware.SiteId = ExtractStringValue(content, i, "SiteId");
@@ -49,10 +65,20 @@ namespace VerisFlow.LayParser.Core
                 labware.TForm2 = ExtractTFormVector(content, i, 2);
                 labware.TForm3 = ExtractTFormVector(content, i, 3);
 
-                labwareList.Add(labware);
+                deckData.Labware.Add(labware);
             }
 
-            return labwareList;
+            return deckData;
+        }
+
+        /// <summary>
+        /// Parses a deck layout file to extract detailed labware information based on specific rules.
+        /// </summary>
+        /// <param name="deckLayoutFilePath">The full path to the .lay file.</param>
+        /// <returns>A list of LabwareInfo objects.</returns>
+        public static List<LabwareInfo> GetLabwareInfo(string deckLayoutFilePath)
+        {
+            return GetDeckData(deckLayoutFilePath).Labware;
         }
 
         /// <summary>
