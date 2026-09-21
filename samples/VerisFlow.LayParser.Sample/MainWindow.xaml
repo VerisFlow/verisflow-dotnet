@@ -133,7 +133,12 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0">
-                            <TextBlock Text="Deck Layout Reporter" FontSize="22" FontWeight="SemiBold" Foreground="#1C1C1C"/>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Deck Layout Reporter" FontSize="22" FontWeight="SemiBold" Foreground="#1C1C1C"/>
+                                <Border x:Name="InstrumentBadge" Background="#E8F2FF" BorderBrush="#0078D7" BorderThickness="1" CornerRadius="3" Padding="8,2" Margin="12,0,0,0" VerticalAlignment="Center" Visibility="Collapsed">
+                                    <TextBlock x:Name="InstrumentTextBlock" Foreground="#0078D7" FontWeight="SemiBold" FontSize="12"/>
+                                </Border>
+                            </StackPanel>
                             <TextBlock Text="Select a deck layout file (.lay) to view the processed labware information."
                                        Foreground="#555555" TextWrapping="Wrap" Margin="0,5,0,0"/>
                         </StackPanel>

@@ -4,6 +4,15 @@ using System.Collections.Generic;
 namespace VerisFlow.LayParser.Core
 {
     /// <summary>
+    /// Represents the parsed deck layout data including the instrument and its labware items.
+    /// </summary>
+    public class DeckData
+    {
+        public string Instrument { get; set; } = string.Empty;
+        public List<LabwareInfo> Labware { get; set; } = new List<LabwareInfo>();
+    }
+
+    /// <summary>
     /// Represents a 3D vector for TForm data.
     /// </summary>
     public class TFormVector
