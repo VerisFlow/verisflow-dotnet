@@ -2,16 +2,22 @@
 
   <PropertyGroup>
       <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
-      <Version>0.3.0</Version>
-      
+      <LangVersion>latest</LangVersion>
+      <Version>0.4.0</Version>
+
       <!-- Package Identification -->
       <PackageId>VerisFlow.LayParser.Core</PackageId>
       <Title>VerisFlow.LayParser.Core</Title>
-      
+
       <Description>Parser and data processor for Hamilton Venus deck layout (.lay) files.</Description>
       <PackageTags>venus;deck;layout;parser;labware;automation</PackageTags>
       <PackageReadmeFile>README.md</PackageReadmeFile>
       <PackageIcon>icon.png</PackageIcon>
+      <PackageReleaseNotes>
+0.4.0: Length-prefixed value reading (fixes identifiers of 33+ characters and Dx/Dim.Dx ambiguity); rack boundary,
+pitch, explicit positions, outline origin, and position centers; carrier sites and track positions; Angle, StackID,
+and raw Z components; coordinates rounded to 3 decimals instead of floored. FinalZ calculation is unchanged.
+      </PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

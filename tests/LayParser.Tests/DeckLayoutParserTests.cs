@@ -1,10 +1,14 @@
-﻿using System;
+using System;
 using System.IO;
 using VerisFlow.LayParser.Core;
 using Xunit;
 
 namespace VerisFlow.LayParser.Core.Tests
 {
+    /// <summary>
+    /// Layout files written as "key value" text (separator format). Packed files with length prefixes are covered by
+    /// <see cref="PackedFormatParserTests"/>.
+    /// </summary>
     public class DeckLayoutParserTests : IDisposable
     {
         private readonly string _tempDirectory;
@@ -25,7 +29,7 @@ namespace VerisFlow.LayParser.Core.Tests
         }
 
         [Fact]
-        public void GetLabwareInfo_WithValidFile_ParsesAllFieldsCorrectly()
+        public void GetLabwareInfo_WithSeparatorFormat_ParsesAllFieldsAndRoundsTo3Decimals()
         {
             string layPath = Path.Combine(_tempDirectory, "sample.lay");
             string layContent = @"
@@ -56,11 +60,17 @@ Labware.1.TForm.3.Z 300.7779
             Assert.Equal("Carrier1", labware.Id);
             Assert.Equal("Site_A", labware.SiteId);
             Assert.Equal("CustomTemplate", labware.Template);
-            Assert.Equal(15.5, labware.ZTrans);
+            Assert.Equal(Path.Combine(DeckLayoutParser.HamiltonLabwareBasePath, "ML_STAR_Deck.tml"), labware.FilePath);
+
+            // Since 0.4.0 values are rounded to 3 decimals (versions before floored them: 15.5, 100.555, ...).
+            Assert.Equal(15.501, labware.ZTrans);
             Assert.Equal(10.1, labware.ZTransValue);
-            Assert.Equal(100.555, labware.TForm3.X);
-            Assert.Equal(200.666, labware.TForm3.Y);
-            Assert.Equal(300.777, labware.TForm3.Z);
+            Assert.True(labware.HasZTransValue);
+            Assert.Equal(1.112, labware.TForm1.X);
+            Assert.Equal(5.556, labware.TForm2.Y);
+            Assert.Equal(100.556, labware.TForm3.X);
+            Assert.Equal(200.667, labware.TForm3.Y);
+            Assert.Equal(300.778, labware.TForm3.Z);
         }
 
         [Fact]
@@ -82,6 +92,18 @@ Labware.1.TForm.3.Z 300.7779
             var result = DeckLayoutParser.GetLabwareInfo(layPath);
 
             Assert.Empty(result);
+        }
+
+        [Fact]
+        public void GetDeckData_WithoutInstrumentKey_ReadsInstrumentFromHeader()
+        {
+            string layPath = Path.Combine(_tempDirectory, "header.lay");
+            File.WriteAllText(layPath, "DECKLAY,ML_STAR\nLabware.Cnt 0\n");
+
+            var deck = DeckLayoutParser.GetDeckData(layPath);
+
+            Assert.Equal("ML_STAR", deck.Instrument);
+            Assert.Empty(deck.Labware);
         }
     }
 }

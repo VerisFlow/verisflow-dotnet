@@ -1,9 +1,9 @@
-﻿using System.Globalization;
-using System.Text.RegularExpressions;
-using System.IO;
 using System;
-using System.Linq;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
 
 namespace VerisFlow.LayParser.Core
 {
@@ -13,300 +13,535 @@ namespace VerisFlow.LayParser.Core
     /// </summary>
     public static class LabwareDataProcessor
     {
+        private const double TipRackContainerBaseThreshold = -10;
+        private const int MaxExplicitPositions = 10000;
+        private const int MaxSegments = 100;
+        private const int MaxSites = 1000;
+
         /// <summary>
-        /// Processes a list of raw LabwareInfo objects to calculate final coordinates.
-        /// TForm vectors are summed, and ZTrans/ZTransValue are added to the Z coordinate.
-        /// It also determines the LabwareType and if the labware is Loadable.
+        /// Processes a list of raw LabwareInfo objects to calculate final coordinates and geometry.
         /// </summary>
+        /// <remarks>
+        /// FinalX/FinalY are TForm.3 (see <see cref="ProcessedLabwareInfo.ReferenceKind"/>). FinalZ starts at ZTrans:
+        /// ZTransValue 0 adds the container BaseMM; ZTransValue 1 adds Cntr.1.base and the container BaseMM;
+        /// ZTransValue 2 (carriers) uses ZTrans as is. Each labware or container file is read once per call.
+        /// </remarks>
         /// <param name="rawData">The list of raw LabwareInfo objects parsed from the file.</param>
         /// <returns>A list of ProcessedLabwareInfo objects with the final calculated data.</returns>
         public static List<ProcessedLabwareInfo> Process(List<LabwareInfo> rawData)
         {
-            return rawData.Select(rawLabware =>
+#if NET6_0_OR_GREATER
+            ArgumentNullException.ThrowIfNull(rawData);
+#else
+            if (rawData == null)
             {
-                // Sum the X, Y, and Z components of the three TForm vectors
-                double sumX = rawLabware.TForm3.X;
-                double sumY = rawLabware.TForm3.Y;
-                //double sumZ = rawLabware.TForm1.Z + rawLabware.TForm2.Z + rawLabware.TForm3.Z;
+                throw new ArgumentNullException(nameof(rawData));
+            }
+#endif
 
-                // Add ZTrans and ZTransValue to the summed Z value to get the final Z coordinate
-                double finalZ = rawLabware.ZTrans;
+            var files = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            return rawData.Select(raw => ProcessLabware(raw, files)).ToList();
+        }
 
-                var labwareType = LabwareType.Unknown; // Default value
-                string extension = Path.GetExtension(rawLabware.FilePath)?.ToLowerInvariant() ?? string.Empty;
+        private static ProcessedLabwareInfo ProcessLabware(LabwareInfo raw, Dictionary<string, string?> files)
+        {
+            var notes = new List<string>();
 
-                switch (extension)
+            var finalX = raw.TForm3.X;
+            var finalY = raw.TForm3.Y;
+            var finalZ = raw.ZTrans;
+
+            var labwareType = GetLabwareType(raw);
+            var isLoadable = labwareType == LabwareType.Carrier && !string.IsNullOrEmpty(raw.SiteId);
+
+            var definition = ReadFileCached(raw.FilePath, files);
+            var properties = definition != null ? ReadLabwareProperties(definition) : new LabwareProperties();
+
+            if (definition == null)
+            {
+                Console.WriteLine($"File not found: {raw.FilePath}");
+                notes.Add(FormattableString.Invariant(
+                    $"The labware definition '{raw.FilePath}' could not be read; dimensions, positions, and container data are unavailable."));
+            }
+
+            var isTipRack = properties.CntrBase < TipRackContainerBaseThreshold;
+            var alphaIndex = properties.IxIndex == 1;
+            var row = properties.Rows;
+            var column = (row > 0 && properties.Columns == 0) ? 1 : properties.Columns;
+            var parentId = IsDefault(raw.Template) ? string.Empty : raw.Template;
+
+            ContainerProperties? containerProperties = null;
+            if (!string.IsNullOrEmpty(properties.CntrFile))
+            {
+                var containerDefinition = ReadFileCached(properties.CntrFile, files);
+                if (containerDefinition != null)
                 {
-                    case ".tml":
-                        labwareType = LabwareType.Carrier;
-                        break;
-                    case ".rck":
-                        labwareType = LabwareType.Rack;
-                        break;
-                    case ".ctr":
-                        labwareType = LabwareType.Container;
-                        break;
+                    containerProperties = ReadContainerProperties(containerDefinition);
+                }
+                else
+                {
+                    Console.WriteLine($"Container file not found: {properties.CntrFile}");
+                }
+            }
+
+            // --- Z: unchanged algorithm ---
+            var zCalculationIncomplete = false;
+            var validationWarning = string.Empty;
+
+            if (raw.ZTransValue == 0)
+            {
+                if (containerProperties != null)
+                {
+                    finalZ += containerProperties.BaseMM;
+                }
+                else
+                {
+                    zCalculationIncomplete = true;
+                    validationWarning = FormattableString.Invariant(
+                        $"Critical physics warning: ZTransValue is 0 for Labware '{raw.Id}', but the container file is missing or unreadable. BaseMM could not be applied. FinalZ is likely incorrect and unsafe for physical execution.");
+                    Console.WriteLine(validationWarning);
+                }
+            }
+            else if (raw.ZTransValue == 1)
+            {
+                if (containerProperties != null)
+                {
+                    finalZ += properties.CntrBase;
+                    finalZ += containerProperties.BaseMM;
+                }
+                else
+                {
+                    zCalculationIncomplete = true;
+                    validationWarning = FormattableString.Invariant(
+                        $"Critical physics warning: ZTransValue is 1 for Labware '{raw.Id}', but the container file is missing or unreadable. Cntr.1.base and BaseMM could not be applied. FinalZ is likely incorrect and unsafe for physical execution.");
+                    Console.WriteLine(validationWarning);
+                }
+            }
+            else if (raw.ZTransValue != 2)
+            {
+                // Value 2 is used by carriers: ZTrans is their height as is. Anything else is unknown.
+                notes.Add(FormattableString.Invariant(
+                    $"ZTransValue {raw.ZTransValue} is not a known value (0, 1, or 2); FinalZ is ZTrans without further offsets."));
+            }
+
+            // --- Outline and positions ---
+            var isRack = labwareType == LabwareType.Rack || labwareType == LabwareType.RackCarrier;
+            var reference = isRack ? PositionReference.FirstPosition : PositionReference.Origin;
+            var originX = finalX;
+            var originY = finalY;
+            var positions = new List<LabwarePosition>();
+
+            if (isRack && definition != null)
+            {
+                var boundaryX = properties.UseBoundary ? properties.BoundaryX : 0;
+                var boundaryY = properties.UseBoundary ? properties.BoundaryY : 0;
+
+                if (!properties.UseBoundary)
+                {
+                    notes.Add("UseBndry is 0: the first position is assumed to lie at the rack's boundary origin (BndryX/BndryY treated as 0). This rule is not verified.");
                 }
 
-                if (labwareType == LabwareType.Rack && string.Equals(rawLabware.Template, "default", StringComparison.OrdinalIgnoreCase))
+                if (properties.Stagger != 0)
                 {
-                    labwareType = LabwareType.RackCarrier;
+                    notes.Add("The rack uses a staggered position layout, which is not supported; positions are computed as a regular grid.");
                 }
 
-                // Determine if the labware is loadable based on its type and SiteId
-                var isLoadable = labwareType == LabwareType.Carrier && !string.IsNullOrEmpty(rawLabware.SiteId);
-
-                var properties = ReadLabwareProperties(rawLabware.FilePath);
-
-                var isTipRack = properties.CntrBase < -10;
-                var alphaIndex = properties.IxIndex == 1;
-
-                var row = properties.Rows;
-                var column = (row > 0 && properties.Columns == 0) ? 1 : properties.Columns;
-
-                var template = string.Equals(rawLabware.Template, "default", StringComparison.OrdinalIgnoreCase) ? "" : rawLabware.Template;
-
-                ContainerProperties? containerProperties = null;
-                if (!string.IsNullOrEmpty(properties.CntrFile) && File.Exists(properties.CntrFile))
+                if (properties.ExplicitPositions.Count > 0)
                 {
-                    containerProperties = ReadContainerProperties(properties.CntrFile);
-                }
+                    var first = properties.ExplicitPositions[0];
+                    originX = finalX - boundaryX - first.X;
+                    originY = finalY - boundaryY - first.Y;
 
-                bool zCalculationIncomplete = false;
-                string validationWarning = string.Empty;
-
-                // Handle missing BaseMM dependency gracefully without crashing
-                if (rawLabware.ZTransValue == 0)
-                {
-                    if (containerProperties != null)
+                    foreach (var definitionPosition in properties.ExplicitPositions)
                     {
-                        finalZ += containerProperties.BaseMM;
-                    }
-                    else
-                    {
-                        zCalculationIncomplete = true;
-                        validationWarning = FormattableString.Invariant($"Critical physics warning: ZTransValue is 0 for Labware '{rawLabware.Id}', but the container file is missing or unreadable. BaseMM could not be applied. FinalZ is likely incorrect and unsafe for physical execution.");
-                        Console.WriteLine(validationWarning);
+                        positions.Add(new LabwarePosition
+                        {
+                            Index = definitionPosition.Index,
+                            Name = definitionPosition.Id.Length > 0
+                                ? definitionPosition.Id
+                                : definitionPosition.Index.ToString(CultureInfo.InvariantCulture),
+                            Row = definitionPosition.Index,
+                            Column = 1,
+                            X = HxCfgText.Round3(finalX + definitionPosition.X - first.X),
+                            Y = HxCfgText.Round3(finalY + definitionPosition.Y - first.Y)
+                        });
                     }
                 }
-                else if (rawLabware.ZTransValue == 1)
+                else
                 {
-                    if (containerProperties != null)
-                    {
-                        finalZ += properties.CntrBase;
-                        finalZ += containerProperties.BaseMM;
-                    }
-                    else
-                    {
-                        zCalculationIncomplete = true;
-                        validationWarning = FormattableString.Invariant($"Critical physics warning: ZTransValue is 0 for Labware '{rawLabware.Id}', but the container file is missing or unreadable. BaseMM could not be applied. FinalZ is likely incorrect and unsafe for physical execution.");
-                        Console.WriteLine(validationWarning);
-                    }
-                }
+                    // The grid extends from the front-left position at the boundary point; position 1 (A1) is at the back-left.
+                    originX = finalX - boundaryX;
+                    originY = finalY - boundaryY - Math.Max(0, row - 1) * properties.PitchY;
 
-                return new ProcessedLabwareInfo
-                {
-                    Index = rawLabware.Index,
-                    Id = rawLabware.Id,
-                    FilePath = rawLabware.FilePath,
-                    FinalX = sumX,
-                    FinalY = sumY,
-                    FinalZ = finalZ,
-                    Template = template,
-                    LabwareType = labwareType,
-                    Loadable = isLoadable,
-                    Dx = properties.DimDx,
-                    Dy = properties.DimDy,
-                    Column = column,
-                    Row = row,
-                    AlphaIndex = alphaIndex,
-                    TipRack = isTipRack,
-                    ContainerProperties = containerProperties,
-                    IsZCalculationIncomplete = zCalculationIncomplete,
-                    ValidationWarning = validationWarning
-                };
+                    if (row > 0 && column > 0)
+                    {
+                        for (var c = 1; c <= column; c++)
+                        {
+                            for (var r = 1; r <= row; r++)
+                            {
+                                var index = (c - 1) * row + r;
+                                positions.Add(new LabwarePosition
+                                {
+                                    Index = index,
+                                    Name = alphaIndex
+                                        ? RowName(r) + c.ToString(CultureInfo.InvariantCulture)
+                                        : index.ToString(CultureInfo.InvariantCulture),
+                                    Row = r,
+                                    Column = c,
+                                    X = HxCfgText.Round3(finalX + (c - 1) * properties.PitchX),
+                                    Y = HxCfgText.Round3(finalY - (r - 1) * properties.PitchY)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (IsRotated(raw))
+            {
+                notes.Add("The labware is rotated (Angle or TForm.1/TForm.2 is not the identity). Rotation is not applied; the outline and positions are unrotated.");
+            }
+
+            originX = HxCfgText.Round3(originX);
+            originY = HxCfgText.Round3(originY);
+            finalZ = HxCfgText.Round3(finalZ);
+
+            // --- Carrier sites and track ---
+            var sites = properties.Sites.Select(site => new CarrierSite
+            {
+                Index = site.Index,
+                Id = site.Id,
+                X = site.X,
+                Y = site.Y,
+                Z = site.Z,
+                Dx = site.Dx,
+                Dy = site.Dy,
+                StackSize = site.StackSize,
+                LabwareFile = site.LabwareFile,
+                AbsoluteX = HxCfgText.Round3(originX + site.X),
+                AbsoluteY = HxCfgText.Round3(originY + site.Y),
+                AbsoluteZ = HxCfgText.Round3(finalZ + site.Z)
             }).ToList();
+
+            int? track = null;
+            int? trackWidth = null;
+            if (parentId.Length == 0 && DeckGeometry.TryParseTrackSite(raw.SiteId, out var width, out var firstTrack))
+            {
+                track = firstTrack;
+                trackWidth = width;
+            }
+
+            return new ProcessedLabwareInfo
+            {
+                Index = raw.Index,
+                Id = raw.Id,
+                FilePath = raw.FilePath,
+                FinalX = finalX,
+                FinalY = finalY,
+                FinalZ = finalZ,
+                Template = parentId,
+                LabwareType = labwareType,
+                Loadable = isLoadable,
+                Dx = properties.DimDx,
+                Dy = properties.DimDy,
+                Column = column,
+                Row = row,
+                AlphaIndex = alphaIndex,
+                TipRack = isTipRack,
+                ContainerProperties = containerProperties,
+                IsZCalculationIncomplete = zCalculationIncomplete,
+                ValidationWarning = validationWarning,
+
+                SiteId = raw.SiteId,
+                ParentId = parentId,
+                StackId = raw.StackId,
+                Angle = raw.Angle,
+                Dz = properties.DimDz,
+                ZTrans = raw.ZTrans,
+                ZTransValue = raw.HasZTransValue ? raw.ZTransValue : (double?)null,
+                ContainerBaseOffset = properties.CntrBase,
+                ContainerBaseMM = containerProperties?.BaseMM,
+                ReferenceKind = reference,
+                OriginX = originX,
+                OriginY = originY,
+                BoundaryX = properties.BoundaryX,
+                BoundaryY = properties.BoundaryY,
+                UseBoundary = properties.UseBoundary,
+                PitchX = properties.PitchX,
+                PitchY = properties.PitchY,
+                HoleDx = properties.HoleDx,
+                HoleDy = properties.HoleDy,
+                HoleShape = properties.HoleShape,
+                HasExplicitPositions = properties.ExplicitPositions.Count > 0,
+                Positions = positions,
+                Sites = sites,
+                Track = track,
+                TrackWidth = trackWidth,
+                GeometryNotes = notes
+            };
+        }
+
+        private static LabwareType GetLabwareType(LabwareInfo raw)
+        {
+            string extension;
+            try
+            {
+                extension = Path.GetExtension(raw.FilePath)?.ToLowerInvariant() ?? string.Empty;
+            }
+            catch (ArgumentException)
+            {
+                extension = string.Empty;
+            }
+
+            var labwareType = LabwareType.Unknown;
+            switch (extension)
+            {
+                case ".tml":
+                    labwareType = LabwareType.Carrier;
+                    break;
+                case ".rck":
+                    labwareType = LabwareType.Rack;
+                    break;
+                case ".ctr":
+                    labwareType = LabwareType.Container;
+                    break;
+            }
+
+            if (labwareType == LabwareType.Rack && IsDefault(raw.Template))
+            {
+                labwareType = LabwareType.RackCarrier;
+            }
+
+            return labwareType;
+        }
+
+        private static bool IsDefault(string template)
+        {
+            return string.Equals(template, "default", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
-        /// Reads the content of a labware file to extract key properties.
+        /// TForm.1/TForm.2 of unrotated labware are (1,0,0)/(0,1,0). All-zero vectors mean the layout had no TForm entries.
         /// </summary>
-        /// <param name="filePath">The full path to the labware file (.rck, .tml, etc.).</param>
-        /// <returns>A LabwareProperties object containing the extracted values. Returns an object with default values (0) if the file cannot be read or properties are not found.</returns>
-        private static LabwareProperties ReadLabwareProperties(string filePath)
+        private static bool IsRotated(LabwareInfo raw)
         {
-            // Initialize with default values (0 for numeric types)
-            var properties = new LabwareProperties();
-
-            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            if (raw.Angle != 0)
             {
-                Console.WriteLine($"File not found: {filePath}");
-                return properties;
+                return true;
             }
 
-            try
-            {
-                string content = File.ReadAllText(filePath);
+            return !IsVectorOrMissing(raw.TForm1, 1, 0, 0) || !IsVectorOrMissing(raw.TForm2, 0, 1, 0);
+        }
 
-                // --- Extract Double Values ---
-                // \b is a word boundary to ensure we match "Dim.Dx" and not "OtherDim.Dx"
-                // \s+ matches one or more whitespace characters
-                // ([-\d\.]+) captures a group of digits, a hyphen, or a dot (for the value)
-                var dxMatch = Regex.Match(content, @"\bDim\.Dx[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                if (dxMatch.Success)
-                {
-                    double.TryParse(dxMatch.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double dx);
-                    properties.DimDx = dx;
-                }
-
-                var dyMatch = Regex.Match(content, @"\bDim\.Dy[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                if (dyMatch.Success)
-                {
-                    double.TryParse(dyMatch.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double dy);
-                    properties.DimDy = dy;
-                }
-
-                // Note the escaped dots in the property name
-                var cntrBaseMatch = Regex.Match(content, @"\bCntr\.1\.base[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                if (cntrBaseMatch.Success)
-                {
-                    double.TryParse(cntrBaseMatch.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double cntrBase);
-                    properties.CntrBase = cntrBase;
-                }
-
-                // --- Extract Integer Values ---
-                var ixIndexMatch = Regex.Match(content, @"\bIX\.Index[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                if (ixIndexMatch.Success)
-                {
-                    if (int.TryParse(ixIndexMatch.Groups[1].Value, out int ixIndex))
-                    {
-                        properties.IxIndex = ixIndex;
-                    }
-                }
-
-                // --- Handle Special Logic for Rows and Columns ---
-                bool rowsFound = false;
-                var rowsMatch = Regex.Match(content, @"\bRows[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                // Check for match and then parse. The 'rowsValue' variable is now safely scoped inside the 'if'.
-                if (rowsMatch.Success && int.TryParse(rowsMatch.Groups[1].Value, out int rowsValue))
-                {
-                    properties.Rows = rowsValue;
-                    rowsFound = true;
-                }
-
-                bool colsFound = false;
-                var colsMatch = Regex.Match(content, @"\bColumns[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                if (colsMatch.Success && int.TryParse(colsMatch.Groups[1].Value, out int colsValue))
-                {
-                    properties.Columns = colsValue;
-                    colsFound = true;
-                }
-
-                // If BOTH Rows and Columns were not found in the file, check for HoleCnt
-                if (!rowsFound && !colsFound)
-                {
-                    var holeCntMatch = Regex.Match(content, @"\bHoleCnt[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                    if (holeCntMatch.Success && int.TryParse(holeCntMatch.Groups[1].Value, out int holeCnt))
-                    {
-                        // As per the requirement, assign the HoleCnt value to Rows
-                        properties.Rows = holeCnt;
-                    }
-                }
-
-                // Extract Cntr.1.file path handling potential control characters and quotes
-                var cntrFileMatch = Regex.Match(content, @"\bCntr\.1\.file[\s\S]([^\x00-\x1F\x7F]+)");
-                if (cntrFileMatch.Success)
-                {
-                    string rawPath = cntrFileMatch.Groups[1].Value.Trim();
-                    if (!string.IsNullOrEmpty(rawPath))
-                    {
-                        properties.CntrFile = Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(DeckLayoutParser.HamiltonLabwareBasePath, rawPath);
-                    }
-                }
-
-                return properties;
-            }
-            catch (Exception ex)
-            {
-                // If there's an error reading the file (e.g., access denied), return default values
-                Console.WriteLine($"Could not read properties from {filePath}: {ex.Message}");
-                return properties;
-            }
+        private static bool IsVectorOrMissing(TFormVector vector, double x, double y, double z)
+        {
+            var missing = vector.X == 0 && vector.Y == 0 && vector.Z == 0;
+            return missing || (vector.X == x && vector.Y == y && vector.Z == z);
         }
 
         /// <summary>
-        /// Reads the content of a container file to extract key properties dynamically.
+        /// "A".."Z", then "AA", "AB", ... for 1-based row numbers.
         /// </summary>
-        /// <param name="filePath">The full path to the container file (.ctr).</param>
-        /// <returns>A ContainerProperties object containing the extracted values.</returns>
-        private static ContainerProperties ReadContainerProperties(string filePath)
+        private static string RowName(int row)
         {
-            var properties = new ContainerProperties();
-
-            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            var name = new StringBuilder();
+            while (row > 0)
             {
-                Console.WriteLine($"Container file not found: {filePath}");
-                return properties;
+                row--;
+                name.Insert(0, (char)('A' + row % 26));
+                row /= 26;
             }
 
+            return name.ToString();
+        }
+
+        /// <summary>
+        /// Reads a file once per processing run. Returns null (also cached) when it is missing or unreadable.
+        /// </summary>
+        private static string? ReadFileCached(string path, Dictionary<string, string?> files)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return null;
+            }
+
+            if (files.TryGetValue(path, out var cached))
+            {
+                return cached;
+            }
+
+            string? content = null;
             try
             {
-                string content = File.ReadAllText(filePath);
-
-                properties.DimDx = ExtractDoubleFromContent(content, @"\bDim\.Dx[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                properties.DimDy = ExtractDoubleFromContent(content, @"\bDim\.Dy[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                properties.BaseMM = ExtractDoubleFromContent(content, @"\bBaseMM[\s\x00-\x1F\x7F]+([-\d\.]+)");
-
-                var segmentsMatch = Regex.Match(content, @"\bSegments[\s\x00-\x1F\x7F]+(\d+)");
-                if (segmentsMatch.Success && int.TryParse(segmentsMatch.Groups[1].Value, out int segmentsCount))
+                if (File.Exists(path))
                 {
-                    properties.SegmentsCount = segmentsCount;
-
-                    for (int i = 1; i <= segmentsCount; i++)
-                    {
-                        var segment = new ContainerSegment { Index = i };
-
-                        segment.Dx = ExtractDoubleFromContent(content, $@"\b{i}\.DX[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                        segment.Dy = ExtractDoubleFromContent(content, $@"\b{i}\.DY[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                        segment.Dz = ExtractDoubleFromContent(content, $@"\b{i}\.DZ[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                        segment.Max = ExtractDoubleFromContent(content, $@"\b{i}\.Max[\s\x00-\x1F\x7F]+([-\d\.]+)");
-                        segment.Min = ExtractDoubleFromContent(content, $@"\b{i}\.Min[\s\x00-\x1F\x7F]+([-\d\.]+)");
-
-                        var shapeMatch = Regex.Match(content, $@"\b{i}\.Shape[\s\x00-\x1F\x7F]+(\d+)");
-                        if (shapeMatch.Success && int.TryParse(shapeMatch.Groups[1].Value, out int shape))
-                        {
-                            segment.Shape = shape;
-                        }
-
-                        var eqnMatch = Regex.Match(content, $@"\b{i}\.EqnOfVol[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)");
-                        if (eqnMatch.Success)
-                        {
-                            segment.EqnOfVol = eqnMatch.Groups[1].Value;
-                        }
-
-                        properties.Segments.Add(segment);
-                    }
+                    content = HxCfgText.ReadAllText(path);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Could not read properties from container file {filePath}: {ex.Message}");
+                Console.WriteLine($"Could not read {path}: {ex.Message}");
             }
+
+            files[path] = content;
+            return content;
+        }
+
+        /// <summary>
+        /// Extracts key properties from the content of a labware file (.rck, .tml).
+        /// Missing values keep their defaults (0 / empty).
+        /// </summary>
+        private static LabwareProperties ReadLabwareProperties(string content)
+        {
+            var properties = new LabwareProperties
+            {
+                DimDx = HxCfgText.GetDouble(content, "Dim.Dx"),
+                DimDy = HxCfgText.GetDouble(content, "Dim.Dy"),
+                DimDz = HxCfgText.GetDouble(content, "Dim.Dz"),
+                CntrBase = HxCfgText.GetDouble(content, "Cntr.1.base"),
+                IxIndex = HxCfgText.GetInt32(content, "IX.Index"),
+                HoleCount = HxCfgText.GetInt32(content, "HoleCnt"),
+                BoundaryX = HxCfgText.GetDouble(content, "BndryX"),
+                BoundaryY = HxCfgText.GetDouble(content, "BndryY"),
+                UseBoundary = HxCfgText.GetInt32(content, "UseBndry") == 1,
+                PitchX = HxCfgText.GetDouble(content, "Dx"),
+                PitchY = HxCfgText.GetDouble(content, "Dy"),
+                HoleDx = HxCfgText.GetDouble(content, "Hole.X"),
+                HoleDy = HxCfgText.GetDouble(content, "Hole.Y"),
+                HoleShape = HxCfgText.GetInt32(content, "Hole.Shape"),
+                Stagger = HxCfgText.GetInt32(content, "Stagger"),
+                DataType = HxCfgText.GetInt32(content, "DataType")
+            };
+
+            var rowsFound = HxCfgText.TryGetInt32(content, "Rows", out var rows);
+            var columnsFound = HxCfgText.TryGetInt32(content, "Columns", out var columns);
+
+            if (rowsFound)
+            {
+                properties.Rows = rows;
+            }
+
+            if (columnsFound)
+            {
+                properties.Columns = columns;
+            }
+
+            // Racks without Rows and Columns (e.g. troughs) declare their positions with HoleCnt.
+            if (!rowsFound && !columnsFound && properties.HoleCount > 0)
+            {
+                properties.Rows = properties.HoleCount;
+            }
+
+            if (HxCfgText.TryGetString(content, "Cntr.1.file", out var containerFile) && containerFile.Trim().Length > 0)
+            {
+                properties.CntrFile = DeckLayoutParser.ResolveLabwarePath(containerFile);
+            }
+
+            properties.ExplicitPositions = ReadExplicitPositions(content, properties.HoleCount);
+            properties.Sites = ReadSites(content);
 
             return properties;
         }
 
         /// <summary>
-        /// Helper method to cleanly extract a double value using a regex pattern.
+        /// Reads "N.ID", "N.X", "N.Y" positions, stopping at the first missing position.
         /// </summary>
-        private static double ExtractDoubleFromContent(string content, string pattern)
+        private static List<RackPositionDefinition> ReadExplicitPositions(string content, int holeCount)
         {
-            var match = Regex.Match(content, pattern);
-            if (match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double result))
+            var positions = new List<RackPositionDefinition>();
+            var limit = holeCount > 0 ? Math.Min(holeCount, MaxExplicitPositions) : MaxExplicitPositions;
+
+            for (var n = 1; n <= limit; n++)
             {
-                return result;
+                var prefix = n.ToString(CultureInfo.InvariantCulture) + ".";
+
+                if (!HxCfgText.TryGetDouble(content, prefix + "X", out var x) || !HxCfgText.TryGetDouble(content, prefix + "Y", out var y))
+                {
+                    break;
+                }
+
+                positions.Add(new RackPositionDefinition
+                {
+                    Index = n,
+                    Id = HxCfgText.GetString(content, prefix + "ID").Trim(),
+                    X = x,
+                    Y = y
+                });
             }
-            return 0.0;
+
+            return positions;
+        }
+
+        /// <summary>
+        /// Reads the sites of a carrier template (Site.Cnt, Site.N.*).
+        /// </summary>
+        private static List<CarrierSite> ReadSites(string content)
+        {
+            var sites = new List<CarrierSite>();
+
+            if (!HxCfgText.TryGetInt32(content, "Site.Cnt", out var count) || count <= 0)
+            {
+                return sites;
+            }
+
+            for (var n = 1; n <= Math.Min(count, MaxSites); n++)
+            {
+                var prefix = "Site." + n.ToString(CultureInfo.InvariantCulture) + ".";
+
+                sites.Add(new CarrierSite
+                {
+                    Index = n,
+                    Id = HxCfgText.GetString(content, prefix + "Id").Trim(),
+                    X = HxCfgText.GetDouble(content, prefix + "X"),
+                    Y = HxCfgText.GetDouble(content, prefix + "Y"),
+                    Z = HxCfgText.GetDouble(content, prefix + "Z"),
+                    Dx = HxCfgText.GetDouble(content, prefix + "Dx"),
+                    Dy = HxCfgText.GetDouble(content, prefix + "Dy"),
+                    StackSize = HxCfgText.TryGetInt32(content, prefix + "StackSize", out var stackSize) ? stackSize : 1,
+                    LabwareFile = HxCfgText.GetString(content, prefix + "LabwareFile").Trim()
+                });
+            }
+
+            return sites;
+        }
+
+        /// <summary>
+        /// Extracts key properties from the content of a container file (.ctr).
+        /// </summary>
+        private static ContainerProperties ReadContainerProperties(string content)
+        {
+            var properties = new ContainerProperties
+            {
+                DimDx = HxCfgText.GetDouble(content, "Dim.Dx"),
+                DimDy = HxCfgText.GetDouble(content, "Dim.Dy"),
+                BaseMM = HxCfgText.GetDouble(content, "BaseMM")
+            };
+
+            if (!HxCfgText.TryGetInt32(content, "Segments", out var segmentsCount) || segmentsCount <= 0)
+            {
+                return properties;
+            }
+
+            properties.SegmentsCount = segmentsCount;
+
+            for (var i = 1; i <= Math.Min(segmentsCount, MaxSegments); i++)
+            {
+                var prefix = i.ToString(CultureInfo.InvariantCulture) + ".";
+
+                properties.Segments.Add(new ContainerSegment
+                {
+                    Index = i,
+                    Dx = HxCfgText.GetDouble(content, prefix + "DX"),
+                    Dy = HxCfgText.GetDouble(content, prefix + "DY"),
+                    Dz = HxCfgText.GetDouble(content, prefix + "DZ"),
+                    Max = HxCfgText.GetDouble(content, prefix + "Max"),
+                    Min = HxCfgText.GetDouble(content, prefix + "Min"),
+                    Shape = HxCfgText.GetInt32(content, prefix + "Shape"),
+                    EqnOfVol = HxCfgText.GetString(content, prefix + "EqnOfVol").Trim()
+                });
+            }
+
+            return properties;
         }
     }
 }
