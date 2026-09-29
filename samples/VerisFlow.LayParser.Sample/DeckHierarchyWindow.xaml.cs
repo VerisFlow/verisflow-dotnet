@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -19,7 +19,7 @@ namespace VerisFlow.VenusDeckParser.Desktop
         public DeckHierarchyWindow(List<ProcessedLabwareInfo> sourceData, string instrumentName)
         {
             InitializeComponent();
-            _sourceData = sourceData;
+            _sourceData = sourceData ?? new List<ProcessedLabwareInfo>();
             _treeNodes = new ObservableCollection<HierarchyNodeViewModel>();
             HierarchyTreeView.ItemsSource = _treeNodes;
 
@@ -52,74 +52,59 @@ namespace VerisFlow.VenusDeckParser.Desktop
         }
 
         /// <summary>
-        /// Rebuilds the tree view hierarchy based on the provided X-axis bounds.
-        /// Labware instances implicitly belong to the Carrier that immediately precedes them.
+        /// Rebuilds the tree from the parent relation of the layout (Template/ParentId): carriers and rack carriers are
+        /// roots, labware is placed under its parent carrier. The X filter applies to the roots; children follow their parent.
+        /// Labware whose parent is not in the layout is shown as a root.
         /// </summary>
         private void BuildHierarchy(double minX, double maxX)
         {
             _treeNodes.Clear();
-            HierarchyNodeViewModel currentCarrierNode = null;
 
-            foreach (var item in _sourceData)
+            var ids = new HashSet<string>(_sourceData.Select(l => l.Id), StringComparer.OrdinalIgnoreCase);
+
+            var roots = _sourceData
+                .Where(l => string.IsNullOrEmpty(l.ParentId) || !ids.Contains(l.ParentId))
+                .Where(l => l.FinalX >= minX && l.FinalX <= maxX)
+                .OrderBy(l => l.FinalX);
+
+            foreach (var root in roots)
             {
-                if (item.FinalX < minX || item.FinalX > maxX)
+                var rootNode = CreateNode(root);
+
+                // Back to front; labware stacked on the same site from bottom to top.
+                var children = _sourceData
+                    .Where(l => string.Equals(l.ParentId, root.Id, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(l => l.FinalY)
+                    .ThenBy(l => l.FinalZ);
+
+                foreach (var child in children)
                 {
-                    continue;
+                    rootNode.Children.Add(CreateNode(child));
                 }
 
-                bool isCarrier = item.LabwareType == LabwareType.Carrier || item.LabwareType == LabwareType.RackCarrier;
+                _treeNodes.Add(rootNode);
+            }
+        }
 
-                var node = new HierarchyNodeViewModel
-                {
-                    IsCarrier = isCarrier,
-                    DisplayText = item.Id,
-                    FinalX = item.FinalX,
-                    FinalY = item.FinalY,
-                    FinalZ = item.FinalZ,
-                    FontWeight = isCarrier ? FontWeights.Bold : FontWeights.Normal
-                };
+        private static HierarchyNodeViewModel CreateNode(ProcessedLabwareInfo item)
+        {
+            bool isCarrier = item.LabwareType == LabwareType.Carrier || item.LabwareType == LabwareType.RackCarrier;
 
-                if (isCarrier)
-                {
-                    currentCarrierNode = node;
-                    _treeNodes.Add(currentCarrierNode);
-                }
-                else
-                {
-                    if (currentCarrierNode != null)
-                    {
-                        currentCarrierNode.Children.Add(node);
-                    }
-                    else
-                    {
-                        // Handles edge cases where a labware appears before any carrier
-                        _treeNodes.Add(node);
-                    }
-                }
+            string displayText = item.Id;
+            if (!string.IsNullOrEmpty(item.StackId))
+            {
+                displayText += $"  [stack {item.StackId}]";
             }
 
-            foreach (var rootNode in _treeNodes)
+            return new HierarchyNodeViewModel
             {
-                if (rootNode.Children.Count > 1)
-                {
-                    var sortedChildren = rootNode.Children.OrderByDescending(c => c.FinalY).ToList();
-                    rootNode.Children.Clear();
-                    foreach (var child in sortedChildren)
-                    {
-                        rootNode.Children.Add(child);
-                    }
-                }
-            }
-
-            if (_treeNodes.Count > 1)
-            {
-                var sortedRoots = _treeNodes.OrderBy(n => n.FinalX).ToList();
-                _treeNodes.Clear();
-                foreach (var root in sortedRoots)
-                {
-                    _treeNodes.Add(root);
-                }
-            }
+                IsCarrier = isCarrier,
+                DisplayText = displayText,
+                FinalX = item.FinalX,
+                FinalY = item.FinalY,
+                FinalZ = item.FinalZ,
+                FontWeight = isCarrier ? FontWeights.Bold : FontWeights.Normal
+            };
         }
     }
 
