@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Globalization;
@@ -10,60 +10,82 @@ namespace VerisFlow.LayParser.Core
     {
         public const string HamiltonLabwareBasePath = @"C:\Program Files (x86)\HAMILTON\LabWare\";
 
+        private static readonly Regex DeckHeaderPattern = new Regex(@"\bDECKLAY,([A-Za-z0-9_]+)", RegexOptions.CultureInvariant);
+
         /// <summary>
         /// Reads deck layout data from a .lay file, extracting instrument and all labware instances in a single pass.
         /// </summary>
         /// <param name="deckLayoutFilePath">The full path to the .lay file.</param>
-        /// <returns>A DeckData object containing the instrument name and labware list.</returns>
+        /// <returns>A DeckData object containing the instrument name and labware list. Empty if the file cannot be read.</returns>
         public static DeckData GetDeckData(string deckLayoutFilePath)
         {
-            var deckData = new DeckData();
             string content;
             try
             {
-                content = File.ReadAllText(deckLayoutFilePath);
+                content = HxCfgText.ReadAllText(deckLayoutFilePath);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error reading deck layout file: {ex.Message}");
+                return new DeckData();
+            }
+
+            return ParseDeckContent(content);
+        }
+
+        /// <summary>
+        /// Parses the content of a .lay file (read with <see cref="HxCfgText.ReadAllText"/>).
+        /// </summary>
+        public static DeckData ParseDeckContent(string content)
+        {
+            var deckData = new DeckData();
+            if (string.IsNullOrEmpty(content))
+            {
                 return deckData;
             }
 
-            // Extract instrument name from the layout content
-            var instMatch = Regex.Match(content, @"\bInstrument[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)");
-            if (instMatch.Success)
+            if (HxCfgText.TryGetString(content, "Instrument", out var instrument) && instrument.Trim().Length > 0)
             {
-                deckData.Instrument = instMatch.Groups[1].Value;
+                deckData.Instrument = instrument.Trim();
             }
             else
             {
-                var headerMatch = Regex.Match(content, @"\bDECKLAY,([^\s\x00-\x1F\x7F,]+)");
+                var headerMatch = DeckHeaderPattern.Match(content);
                 if (headerMatch.Success)
                 {
                     deckData.Instrument = headerMatch.Groups[1].Value;
                 }
             }
 
-            // Extract labware instances
-            var countMatch = Regex.Match(content, @"Labware\.Cnt[\s\x00-\x1F\x7F]+(\d+)");
-            if (!countMatch.Success || !int.TryParse(countMatch.Groups[1].Value, out int labwareCount))
+            if (!HxCfgText.TryGetInt32(content, "Labware.Cnt", out var labwareCount))
             {
                 return deckData;
             }
 
-            for (int i = 1; i <= labwareCount; i++)
+            for (var i = 1; i <= labwareCount; i++)
             {
-                var labware = new LabwareInfo { Index = i };
+                var prefix = "Labware." + i.ToString(CultureInfo.InvariantCulture) + ".";
 
-                labware.FilePath = ExtractFilePath(content, i);
-                labware.Id = ExtractStringValue(content, i, "Id");
-                labware.SiteId = ExtractStringValue(content, i, "SiteId");
-                labware.Template = ExtractStringValue(content, i, "Template");
-                labware.ZTrans = ExtractNumericValue(content, i, "ZTrans");
-                labware.ZTransValue = ExtractNumericValue(content, i, "ZTransValue");
-                labware.TForm1 = ExtractTFormVector(content, i, 1);
-                labware.TForm2 = ExtractTFormVector(content, i, 2);
-                labware.TForm3 = ExtractTFormVector(content, i, 3);
+                var labware = new LabwareInfo
+                {
+                    Index = i,
+                    FilePath = ResolveLabwarePath(HxCfgText.GetString(content, prefix + "File")),
+                    Id = HxCfgText.GetString(content, prefix + "Id").Trim(),
+                    SiteId = HxCfgText.GetString(content, prefix + "SiteId").Trim(),
+                    Template = HxCfgText.GetString(content, prefix + "Template").Trim(),
+                    StackId = HxCfgText.GetString(content, prefix + "StackID").Trim(),
+                    ZTrans = ReadRounded(content, prefix + "ZTrans"),
+                    Angle = ReadRounded(content, prefix + "Angle"),
+                    TForm1 = ReadTFormVector(content, prefix, 1),
+                    TForm2 = ReadTFormVector(content, prefix, 2),
+                    TForm3 = ReadTFormVector(content, prefix, 3)
+                };
+
+                if (HxCfgText.TryGetDouble(content, prefix + "ZTransValue", out var zTransValue))
+                {
+                    labware.ZTransValue = HxCfgText.Round3(zTransValue);
+                    labware.HasZTransValue = true;
+                }
 
                 deckData.Labware.Add(labware);
             }
@@ -82,81 +104,43 @@ namespace VerisFlow.LayParser.Core
         }
 
         /// <summary>
-        /// Extracts a string value for a given labware index and property name.
+        /// Resolves a labware file path from a layout or rack file: relative paths are relative to the Hamilton labware folder.
         /// </summary>
-        private static string ExtractStringValue(string content, int index, string property)
+        internal static string ResolveLabwarePath(string rawPath)
         {
-            var match = Regex.Match(content, $@"Labware\.{index}\.{property}[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)");
-            return match.Success ? match.Groups[1].Value : string.Empty;
-        }
-
-        /// <summary>
-        /// Extracts and processes the File path for a given labware index.
-        /// </summary>
-        private static string ExtractFilePath(string content, int index)
-        {
-            // This regex captures the character after "File" and the path itself.
-            var match = Regex.Match(content, $@"Labware\.{index}\.File.([^\t\r\n\v\f\x00-\x1F\x7F]+)");
-            if (!match.Success)
+            if (string.IsNullOrWhiteSpace(rawPath))
             {
                 return string.Empty;
             }
 
-            string rawPath = match.Groups[1].Value;
+            var path = rawPath.Trim();
 
-            // Check if the path is relative (doesn't contain a colon like C:)
-            if (!Path.IsPathRooted(rawPath))
+            try
             {
-                // Prepend the base path for relative paths
-                return Path.Combine(HamiltonLabwareBasePath, rawPath);
+                return Path.IsPathRooted(path) ? path : Path.Combine(HamiltonLabwareBasePath, path);
             }
-
-            return rawPath;
+            catch (ArgumentException)
+            {
+                // Invalid path characters; report the path as written.
+                return path;
+            }
         }
 
-        /// <summary>
-        /// Extracts a numeric value, floors it to 3 decimal places.
-        /// </summary>
-        private static double ExtractNumericValue(string content, int index, string property)
+        private static double ReadRounded(string content, string key)
         {
-            var match = Regex.Match(content, $@"Labware\.{index}\.{property}[\s\x00-\x1F\x7F]+([-\d\.]+)");
-            if (match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double value))
-            {
-                // Floor the value to 3 decimal places
-                return Math.Floor(value * 1000) / 1000;
-            }
-            return 0.0;
+            return HxCfgText.TryGetDouble(content, key, out var value) ? HxCfgText.Round3(value) : 0.0;
         }
 
-        /// <summary>
-        /// Extracts a TForm vector (X, Y, Z) for a given labware and TForm index.
-        /// </summary>
-        private static TFormVector ExtractTFormVector(string content, int labwareIndex, int tformIndex)
+        private static TFormVector ReadTFormVector(string content, string labwarePrefix, int tformIndex)
         {
-            var vector = new TFormVector();
+            var prefix = labwarePrefix + "TForm." + tformIndex.ToString(CultureInfo.InvariantCulture) + ".";
 
-            // This pattern handles both simple numeric values and values surrounded by control characters.
-            string patternTemplate = $@"Labware\.{labwareIndex}\.TForm\.{tformIndex}\.{{0}}[\s\x00-\x1F\x7F]*([-\d\.]+)";
-
-            var xMatch = Regex.Match(content, string.Format(CultureInfo.InvariantCulture, patternTemplate, "X"));
-            if (xMatch.Success && double.TryParse(xMatch.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double x))
+            return new TFormVector
             {
-                vector.X = Math.Floor(x * 1000) / 1000;
-            }
-
-            var yMatch = Regex.Match(content, string.Format(CultureInfo.InvariantCulture, patternTemplate, "Y"));
-            if (yMatch.Success && double.TryParse(yMatch.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double y))
-            {
-                vector.Y = Math.Floor(y * 1000) / 1000;
-            }
-
-            var zMatch = Regex.Match(content, string.Format(CultureInfo.InvariantCulture, patternTemplate, "Z"));
-            if (zMatch.Success && double.TryParse(zMatch.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double z))
-            {
-                vector.Z = Math.Floor(z * 1000) / 1000;
-            }
-
-            return vector;
+                X = ReadRounded(content, prefix + "X"),
+                Y = ReadRounded(content, prefix + "Y"),
+                Z = ReadRounded(content, prefix + "Z")
+            };
         }
     }
 }

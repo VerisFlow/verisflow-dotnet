@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using VerisFlow.LayParser.Core;
@@ -6,6 +6,10 @@ using Xunit;
 
 namespace VerisFlow.LayParser.Core.Tests
 {
+    /// <summary>
+    /// Labware definitions written as "key value" text (separator format). Geometry with packed definitions is
+    /// covered by <see cref="LabwareGeometryTests"/>.
+    /// </summary>
     public class LabwareDataProcessorTests : IDisposable
     {
         private readonly string _tempDirectory;
@@ -62,12 +66,47 @@ Columns 12
             Assert.Equal(10.5, item.FinalZ);
             Assert.Equal(LabwareType.RackCarrier, item.LabwareType);
             Assert.Equal("", item.Template);
+            Assert.Equal("", item.ParentId);
             Assert.Equal(127.76, item.Dx);
             Assert.Equal(85.48, item.Dy);
             Assert.Equal(8, item.Row);
             Assert.Equal(12, item.Column);
             Assert.True(item.AlphaIndex);
             Assert.True(item.TipRack);
+
+            // "Dim.Dx" must not be read as the column pitch "Dx".
+            Assert.Equal(0, item.PitchX);
+            Assert.Equal(PositionReference.FirstPosition, item.ReferenceKind);
+            Assert.Equal(96, item.Positions.Count);
+            Assert.Contains(item.GeometryNotes, note => note.Contains("UseBndry"));
+        }
+
+        [Fact]
+        public void Process_WithoutContainerFile_KeepsZTransAndReportsIncompleteZ()
+        {
+            string rckPath = Path.Combine(_tempDirectory, "no_container.rck");
+            File.WriteAllText(rckPath, "Dim.Dx 127\nDim.Dy 86\nCntr.1.base 1\nRows 8\nColumns 12\n");
+
+            var rawData = new List<LabwareInfo>
+            {
+                new LabwareInfo
+                {
+                    Index = 1,
+                    Id = "Plate",
+                    FilePath = rckPath,
+                    Template = "Carrier",
+                    ZTrans = 186.15,
+                    ZTransValue = 1,
+                    HasZTransValue = true
+                }
+            };
+
+            var item = LabwareDataProcessor.Process(rawData)[0];
+
+            Assert.Equal(186.15, item.FinalZ);
+            Assert.True(item.IsZCalculationIncomplete);
+            Assert.Contains("ZTransValue is 1", item.ValidationWarning);
+            Assert.Null(item.ContainerBaseMM);
         }
 
         [Theory]
@@ -120,6 +159,26 @@ Columns 12
             Assert.Single(processed);
             Assert.Equal(24, processed[0].Row);
             Assert.Equal(1, processed[0].Column);
+        }
+
+        [Fact]
+        public void Process_WhenDefinitionMissing_AddsGeometryNote()
+        {
+            var rawData = new List<LabwareInfo>
+            {
+                new LabwareInfo
+                {
+                    Index = 1,
+                    Id = "Ghost",
+                    FilePath = Path.Combine(_tempDirectory, "missing.rck"),
+                    Template = "Carrier"
+                }
+            };
+
+            var item = LabwareDataProcessor.Process(rawData)[0];
+
+            Assert.Empty(item.Positions);
+            Assert.Contains(item.GeometryNotes, note => note.Contains("could not be read"));
         }
     }
 }

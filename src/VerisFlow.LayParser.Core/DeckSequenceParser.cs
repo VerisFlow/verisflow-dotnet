@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
@@ -13,6 +13,10 @@ namespace VerisFlow.LayParser.Core
     /// </summary>
     public static class DeckSequenceParser
     {
+        private static readonly Regex ItemKeyPattern = new Regex(
+            @"Seq\.(\d+)\.Item\.(\d+)\.(ObjId|PosId)",
+            RegexOptions.CultureInvariant);
+
         /// <summary>
         /// Parses a deck layout file to extract all defined sequences.
         /// </summary>
@@ -20,16 +24,15 @@ namespace VerisFlow.LayParser.Core
         /// <returns>A list of SequenceInfo objects containing grouped rack matrices.</returns>
         public static List<SequenceInfo> GetSequenceInfo(string deckLayoutFilePath)
         {
-            var sequences = new List<SequenceInfo>();
             string content;
             try
             {
-                content = File.ReadAllText(deckLayoutFilePath);
+                content = HxCfgText.ReadAllText(deckLayoutFilePath);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error reading deck layout file for sequences: {ex.Message}");
-                return sequences;
+                return new List<SequenceInfo>();
             }
 
             return ParseSequenceContent(content);
@@ -44,31 +47,31 @@ namespace VerisFlow.LayParser.Core
         {
             var sequences = new List<SequenceInfo>();
 
-            var totalCountMatch = Regex.Match(content, @"\bSeq\.Cnt[\s\x00-\x1F\x7F]+(\d+)");
-            if (!totalCountMatch.Success || !int.TryParse(totalCountMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int seqCount))
+            if (string.IsNullOrEmpty(content) || !HxCfgText.TryGetInt32(content, "Seq.Cnt", out var seqCount))
             {
                 return sequences;
             }
 
-            for (int i = 1; i <= seqCount; i++)
+            // One pass over the content for all items of all sequences.
+            var items = ReadItems(content);
+
+            for (var i = 1; i <= seqCount; i++)
             {
-                var seqInfo = new SequenceInfo { Index = i };
+                var prefix = "Seq." + i.ToString(CultureInfo.InvariantCulture) + ".";
 
-                seqInfo.Name = ExtractStringValue(content, i, "Name");
-
-                var cntMatch = Regex.Match(content, $@"\bSeq\.{i}\.Cnt[\s\x00-\x1F\x7F]+(\d+)");
-                if (cntMatch.Success && int.TryParse(cntMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int count))
+                var seqInfo = new SequenceInfo
                 {
-                    seqInfo.TotalCount = count;
-                }
+                    Index = i,
+                    Name = HxCfgText.GetString(content, prefix + "Name").Trim(),
+                    TotalCount = HxCfgText.GetInt32(content, prefix + "Cnt"),
+                    ReadOnly = HxCfgText.GetInt32(content, prefix + "ReadOnly") == 1
+                };
 
-                var roMatch = Regex.Match(content, $@"\bSeq\.{i}\.ReadOnly[\s\x00-\x1F\x7F]+(\d+)");
-                if (roMatch.Success && int.TryParse(roMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int readOnlyVal))
-                {
-                    seqInfo.ReadOnly = readOnlyVal == 1;
-                }
-
-                seqInfo.Matrices = ExtractSequenceMatrices(content, i);
+                seqInfo.Matrices = items.TryGetValue(i, out var sequenceItems)
+                    ? BuildMatrices(sequenceItems
+                        .Where(item => item.Value.ObjId.Length > 0)
+                        .Select(item => (item.Key, item.Value.ObjId, item.Value.PosId)))
+                    : ExtractSequenceMatricesBySeparator(content, i);
 
                 sequences.Add(seqInfo);
             }
@@ -77,58 +80,99 @@ namespace VerisFlow.LayParser.Core
         }
 
         /// <summary>
-        /// Extracts a string property value for a given sequence index.
+        /// Reads all "Seq.S.Item.N.ObjId/PosId" values, keyed by sequence and item index.
         /// </summary>
-        private static string ExtractStringValue(string content, int seqIndex, string property)
+        private static Dictionary<int, SortedDictionary<int, SequenceItem>> ReadItems(string content)
         {
-            var match = Regex.Match(content, $@"\bSeq\.{seqIndex}\.{property}[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)");
-            return match.Success ? match.Groups[1].Value : string.Empty;
+            var result = new Dictionary<int, SortedDictionary<int, SequenceItem>>();
+
+            foreach (Match match in ItemKeyPattern.Matches(content))
+            {
+                var key = match.Value;
+                var start = match.Index;
+
+                // Only keys preceded by their own length prefix are real keys.
+                if (start == 0 || content[start - 1] != (char)key.Length)
+                {
+                    continue;
+                }
+
+                if (!HxCfgText.TryReadValueAt(content, start + key.Length, out var value)
+                    || !int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seqIndex)
+                    || !int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var itemIndex))
+                {
+                    continue;
+                }
+
+                if (!result.TryGetValue(seqIndex, out var sequenceItems))
+                {
+                    sequenceItems = new SortedDictionary<int, SequenceItem>();
+                    result[seqIndex] = sequenceItems;
+                }
+
+                if (!sequenceItems.TryGetValue(itemIndex, out var item))
+                {
+                    item = new SequenceItem();
+                    sequenceItems[itemIndex] = item;
+                }
+
+                if (match.Groups[3].Value == "ObjId")
+                {
+                    item.ObjId = value.Trim();
+                }
+                else
+                {
+                    item.PosId = value.Trim();
+                }
+            }
+
+            return result;
         }
 
         /// <summary>
-        /// Extracts all item positions for a sequence, groups them by ObjId, and orders matrices descending.
+        /// Compatibility path for content without length prefixes (behavior of versions before 0.4.0).
         /// </summary>
-        private static List<SequenceRackMatrix> ExtractSequenceMatrices(string content, int seqIndex)
+        private static List<SequenceRackMatrix> ExtractSequenceMatricesBySeparator(string content, int seqIndex)
         {
-            string itemPattern = $@"\bSeq\.{seqIndex}\.Item\.(\d+)\.ObjId[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)[\s\x00-\x1F\x7F]+Seq\.{seqIndex}\.Item\.\1\.PosId[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)";
-            var matches = Regex.Matches(content, itemPattern);
-
+            var itemPattern = $@"\bSeq\.{seqIndex}\.Item\.(\d+)\.ObjId[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)[\s\x00-\x1F\x7F]+Seq\.{seqIndex}\.Item\.\1\.PosId[\s\x00-\x1F\x7F]+([^\s\x00-\x1F\x7F]+)";
             var rawWells = new List<(int Index, string ObjId, string PosId)>();
-            foreach (Match match in matches)
+
+            foreach (Match match in Regex.Matches(content, itemPattern))
             {
-                if (int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int itemIndex))
+                if (int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var itemIndex))
                 {
                     rawWells.Add((itemIndex, match.Groups[2].Value, match.Groups[3].Value));
                 }
             }
 
-            // Group by target labware and sort groups descending by ObjId
-            var matrices = rawWells
+            return BuildMatrices(rawWells);
+        }
+
+        /// <summary>
+        /// Groups item positions by ObjId, ordering matrices descending by ObjId and positions by item index.
+        /// </summary>
+        private static List<SequenceRackMatrix> BuildMatrices(IEnumerable<(int Index, string ObjId, string PosId)> rawWells)
+        {
+            return rawWells
                 .GroupBy(w => w.ObjId)
                 .OrderByDescending(g => g.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(group =>
+                .Select(group => new SequenceRackMatrix
                 {
-                    var matrix = new SequenceRackMatrix
+                    ObjId = group.Key,
+                    TotalWells = group.Count(),
+                    Positions = group.OrderBy(p => p.Index).Select(p =>
                     {
-                        ObjId = group.Key,
-                        TotalWells = group.Count(),
-                        Positions = group.OrderBy(p => p.Index).Select(p =>
+                        var (row, col) = ParseRowAndColumn(p.PosId);
+                        return new SequenceWellPosition
                         {
-                            var (row, col) = ParseRowAndColumn(p.PosId);
-                            return new SequenceWellPosition
-                            {
-                                SequenceIndex = p.Index,
-                                PosId = p.PosId,
-                                RowIndex = row,
-                                ColumnIndex = col
-                            };
-                        }).ToList()
-                    };
-                    return matrix;
+                            SequenceIndex = p.Index,
+                            PosId = p.PosId,
+                            RowIndex = row,
+                            ColumnIndex = col
+                        };
+                    }).ToList()
                 })
                 .ToList();
-
-            return matrices;
         }
 
         /// <summary>
@@ -147,24 +191,30 @@ namespace VerisFlow.LayParser.Core
             var alphaNumericMatch = Regex.Match(posId.Trim(), @"^([A-Za-z]+)(\d+)$");
             if (alphaNumericMatch.Success)
             {
-                string alpha = alphaNumericMatch.Groups[1].Value.ToUpperInvariant();
-                int row = 0;
-                foreach (char ch in alpha)
+                var alpha = alphaNumericMatch.Groups[1].Value.ToUpperInvariant();
+                var row = 0;
+                foreach (var ch in alpha)
                 {
                     row = row * 26 + (ch - 'A' + 1);
                 }
 
-                int.TryParse(alphaNumericMatch.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int col);
+                int.TryParse(alphaNumericMatch.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var col);
                 return (row, col);
             }
 
             // Fallback for purely numeric linear slot indexing
-            if (int.TryParse(posId.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int numericPos))
+            if (int.TryParse(posId.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericPos))
             {
                 return (numericPos, 1);
             }
 
             return (0, 0);
+        }
+
+        private sealed class SequenceItem
+        {
+            public string ObjId { get; set; } = string.Empty;
+            public string PosId { get; set; } = string.Empty;
         }
     }
 }
