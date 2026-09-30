@@ -21,8 +21,9 @@ namespace VerisFlow.LayParser.Core
         /// Parses a deck layout file to extract all defined sequences.
         /// </summary>
         /// <param name="deckLayoutFilePath">The full path to the .lay file.</param>
+        /// <param name="errors">Optional collection to receive any file reading errors.</param>
         /// <returns>A list of SequenceInfo objects containing grouped rack matrices.</returns>
-        public static List<SequenceInfo> GetSequenceInfo(string deckLayoutFilePath)
+        public static List<SequenceInfo> GetSequenceInfo(string deckLayoutFilePath, ICollection<string>? errors = null)
         {
             string content;
             try
@@ -31,7 +32,7 @@ namespace VerisFlow.LayParser.Core
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error reading deck layout file for sequences: {ex.Message}");
+                errors?.Add(FormattableString.Invariant($"Error reading deck layout file for sequences: {ex.Message}"));
                 return new List<SequenceInfo>();
             }
 
