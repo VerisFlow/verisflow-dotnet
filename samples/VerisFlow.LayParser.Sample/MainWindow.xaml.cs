@@ -76,11 +76,11 @@ namespace VerisFlow.VenusDeckParser.Desktop
                     var deckData = DeckLayoutParser.GetDeckData(deckLayoutFile);
                     var processed = LabwareDataProcessor.Process(deckData.Labware);
                     var sequences = DeckSequenceParser.GetSequenceInfo(deckLayoutFile);
-                    var markdown = GenerateMarkdown(deckLayoutFile, deckData.Instrument, processed, sequences);
+                    var markdown = GenerateMarkdown(deckLayoutFile, deckData.Instrument, processed, sequences, deckData.Errors);
 
                     File.WriteAllText(markdownFilePath, markdown, Encoding.UTF8);
 
-                    return (deckData.Instrument, ProcessedData: processed);
+                    return (deckData.Instrument, ProcessedData: processed, deckData.Errors);
                 });
 
                 _instrument = result.Instrument ?? string.Empty;
@@ -106,7 +106,7 @@ namespace VerisFlow.VenusDeckParser.Desktop
                     ? $"[{_instrument}] "
                     : string.Empty;
 
-                int noteCount = result.ProcessedData.Count(l => l.GeometryNotes.Count > 0 || !string.IsNullOrEmpty(l.ValidationWarning));
+                int noteCount = result.ProcessedData.Count(l => l.HasWarnings) + result.Errors.Count;
                 string noteSuffix = noteCount > 0 ? $" {noteCount} labware have notes or warnings (see report)." : string.Empty;
 
                 StatusTextBlock.Text = $"{instrumentPrefix}Displayed {result.ProcessedData.Count} items and saved report to {markdownFilePath}.{noteSuffix}";
@@ -144,8 +144,9 @@ namespace VerisFlow.VenusDeckParser.Desktop
         /// <param name="instrument">The instrument model name extracted from layout.</param>
         /// <param name="processedData">The processed labware collection.</param>
         /// <param name="sequences">The extracted sequence collections with nested matrices.</param>
+        /// <param name="errors">Optional collection of layout parsing errors.</param>
         /// <returns>A formatted markdown document string.</returns>
-        private static string GenerateMarkdown(string deckLayoutFile, string instrument, List<ProcessedLabwareInfo> processedData, List<SequenceInfo> sequences)
+        private static string GenerateMarkdown(string deckLayoutFile, string instrument, List<ProcessedLabwareInfo> processedData, List<SequenceInfo> sequences, List<string>? errors = null)
         {
             var sb = new StringBuilder();
             var labware = processedData ?? new List<ProcessedLabwareInfo>();
@@ -168,7 +169,7 @@ namespace VerisFlow.VenusDeckParser.Desktop
             AppendZCalculation(sb, labware);
             AppendRackGeometry(sb, labware);
             AppendCarrierSites(sb, labware);
-            AppendNotes(sb, labware);
+            AppendNotes(sb, labware, errors);
             AppendSequences(sb, sequences);
 
             return sb.ToString();
@@ -339,20 +340,28 @@ namespace VerisFlow.VenusDeckParser.Desktop
             }
         }
 
-        private static void AppendNotes(StringBuilder sb, List<ProcessedLabwareInfo> labware)
+        private static void AppendNotes(StringBuilder sb, List<ProcessedLabwareInfo> labware, List<string>? errors = null)
         {
             sb.AppendLine("## Geometry Notes and Warnings");
             sb.AppendLine();
 
             var flagged = labware
-                .Where(l => l.GeometryNotes.Count > 0 || !string.IsNullOrEmpty(l.ValidationWarning))
+                .Where(l => l.HasWarnings)
                 .ToList();
 
-            if (flagged.Count == 0)
+            if (flagged.Count == 0 && (errors == null || errors.Count == 0))
             {
                 sb.AppendLine("No geometry notes or warnings.");
                 sb.AppendLine();
                 return;
+            }
+
+            if (errors != null)
+            {
+                foreach (var err in errors)
+                {
+                    sb.AppendLine($"- **Layout Error:** {err}");
+                }
             }
 
             foreach (var item in flagged)
@@ -460,7 +469,7 @@ namespace VerisFlow.VenusDeckParser.Desktop
             return string.IsNullOrEmpty(value) ? string.Empty : value.Replace("|", "\\|");
         }
 
-        private static string Position(LabwarePosition position)
+        private static string Position(LabwarePosition? position)
         {
             return position == null
                 ? "—"
