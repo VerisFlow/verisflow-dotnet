@@ -1,10 +1,14 @@
-﻿// Copyright (c) VerisFlow. All rights reserved.
+// Copyright (c) VerisFlow. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
+
+using System;
+using System.Collections.Generic;
 
 namespace VerisFlow.VenusAuto.Core.Models;
 
 /// <summary>
-/// Represents configuration settings for Hamilton Venus application automation, including process names, executable paths, and UI control coordinates.
+/// Represents configuration settings for Hamilton Venus application automation, including process names, executable paths,
+/// command and control identifiers, and (as a fallback) UI control coordinates.
 /// </summary>
 public class VenusAutoOptions
 {
@@ -29,7 +33,14 @@ public class VenusAutoOptions
     public string RunControlExecutablePath { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the command and control identifiers of Run Control. They do not depend on the UI language, DPI, or
+    /// window position and are preferred over <see cref="RunControlUI"/> coordinates. An identifier of 0 disables it.
+    /// </summary>
+    public RunControlIdentifiers RunControlIds { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets the relative coordinate map for interactive UI elements in the Run Control window.
+    /// Used only when the corresponding identifier in <see cref="RunControlIds"/> is 0.
     /// </summary>
     public AppCoordinates RunControlUI { get; set; } = new();
 
@@ -37,6 +48,52 @@ public class VenusAutoOptions
     /// Gets or sets the relative coordinate map for interactive UI elements in the Method Editor window.
     /// </summary>
     public AppCoordinates MethodEditorUI { get; set; } = new();
+}
+
+/// <summary>
+/// Menu and toolbar command IDs (sent as WM_COMMAND) and control IDs of Run Control and its dialogs.
+/// Defaults were measured on Venus Run Control; an identifier of 0 disables it.
+/// </summary>
+public class RunControlIdentifiers
+{
+    /// <summary>File &gt; Open (MFC ID_FILE_OPEN).</summary>
+    public int OpenFileCommand { get; set; } = 0xE101;
+
+    /// <summary>Toolbar Start.</summary>
+    public int StartCommand { get; set; } = 32795;
+
+    /// <summary>Toolbar Pause.</summary>
+    public int PauseCommand { get; set; } = 32796;
+
+    /// <summary>Toolbar Single Step.</summary>
+    public int SingleStepCommand { get; set; } = 32797;
+
+    /// <summary>Toolbar Abort.</summary>
+    public int AbortCommand { get; set; } = 32798;
+
+    /// <summary>Static control in the main window showing the run status text.</summary>
+    public int StatusControl { get; set; } = 0x8021;
+
+    /// <summary>File name box of the common Open dialog (cmb13).</summary>
+    public int FileNameControl { get; set; } = 0x47C;
+
+    /// <summary>Open button of the file dialog (IDOK).</summary>
+    public int FileDialogOkButton { get; set; } = 1;
+
+    /// <summary>Cancel button of the file dialog (IDCANCEL).</summary>
+    public int FileDialogCancelButton { get; set; } = 2;
+
+    /// <summary>Resume button of the "Execution paused" dialog.</summary>
+    public int PausedResumeButton { get; set; } = 217;
+
+    /// <summary>Abort button of the "Execution paused" dialog.</summary>
+    public int PausedAbortButton { get; set; } = 211;
+
+    /// <summary>Confirm button of the abort confirmation dialog.</summary>
+    public int AbortConfirmButton { get; set; } = 220;
+
+    /// <summary>Cancel button of the abort confirmation dialog (IDCANCEL).</summary>
+    public int AbortCancelButton { get; set; } = 2;
 }
 
 /// <summary>
@@ -99,16 +156,24 @@ public enum RunState
     Paused,
 
     /// <summary>Execution encountered an error or was stopped by a critical exception.</summary>
-    Error
+    Error,
+
+    /// <summary>A dialog blocks Run Control and waits for a person to respond. See <see cref="VenusSystemStatus.Dialogs"/>.</summary>
+    WaitingForUser
 }
+
+/// <summary>
+/// Which toolbar commands Run Control currently allows. Null when the state could not be read.
+/// </summary>
+public record VenusCommandState(bool? CanStart, bool? CanPause, bool? CanSingleStep, bool? CanAbort);
 
 /// <summary>
 /// Represents an immutable snapshot of the Venus system runtime status.
 /// </summary>
 /// <param name="State">The current execution state.</param>
-/// <param name="RawStatusText">The exact unparsed status message extracted from the UI control.</param>
-/// <param name="HasErrorDialog">Indicates whether a blocking error dialog is actively present.</param>
-/// <param name="ErrorMessage">The text message extracted from an active error dialog, if any.</param>
+/// <param name="RawStatusText">The status text shown by Run Control, unparsed (language dependent).</param>
+/// <param name="HasErrorDialog">Indicates whether a dialog other than the pause dialog blocks Run Control.</param>
+/// <param name="ErrorMessage">The text of that dialog, if any.</param>
 /// <param name="LoadedMethodName">The filename or identifier of the method currently loaded in memory.</param>
 public record VenusSystemStatus(
     RunState State,
@@ -116,7 +181,14 @@ public record VenusSystemStatus(
     bool HasErrorDialog,
     string? ErrorMessage,
     string? LoadedMethodName
-);
+)
+{
+    /// <summary>All open Run Control dialogs, topmost first.</summary>
+    public IReadOnlyList<VenusDialogInfo> Dialogs { get; init; } = Array.Empty<VenusDialogInfo>();
+
+    /// <summary>Toolbar command availability, or null when it could not be read.</summary>
+    public VenusCommandState? Commands { get; init; }
+}
 
 /// <summary>
 /// Defines display presets for positioning and sizing process windows on screen.

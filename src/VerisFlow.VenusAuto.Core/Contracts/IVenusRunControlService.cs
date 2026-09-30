@@ -1,6 +1,7 @@
-﻿// Copyright (c) VerisFlow. All rights reserved.
+// Copyright (c) VerisFlow. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using VerisFlow.VenusAuto.Core.Models;
@@ -10,79 +11,81 @@ namespace VerisFlow.VenusAuto.Core.Contracts;
 /// <summary>
 /// Service contract for automating and monitoring Hamilton Venus Run Control process operations.
 /// </summary>
+/// <remarks>
+/// Commands are sent by command and control IDs (see <see cref="RunControlIdentifiers"/>), so they do not depend on the
+/// UI language, window position, or focus. The service never answers dialogs it did not open itself: unexpected dialogs
+/// are reported to the caller (<see cref="VenusDialogInfo"/>), and a person decides how to respond.
+/// </remarks>
 public interface IVenusRunControlService
 {
     /// <summary>
     /// Verifies that the Venus Run Control process is currently running, launching the configured executable if missing.
     /// </summary>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous start operation.</returns>
     Task EnsureProcessStartedAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Moves and resizes the primary Venus application window according to the requested layout preset.
     /// </summary>
-    /// <param name="preset">The layout preset specifying screen placement strategy.</param>
-    /// <param name="customX">The X position offset when <paramref name="preset"/> is <see cref="WindowLayoutPreset.Custom"/>.</param>
-    /// <param name="customY">The Y position offset when <paramref name="preset"/> is <see cref="WindowLayoutPreset.Custom"/>.</param>
-    /// <param name="customWidth">The window width when <paramref name="preset"/> is <see cref="WindowLayoutPreset.Custom"/>.</param>
-    /// <param name="customHeight">The window height when <paramref name="preset"/> is <see cref="WindowLayoutPreset.Custom"/>.</param>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous window positioning operation.</returns>
     Task ArrangeWindowAsync(WindowLayoutPreset preset, int customX = 0, int customY = 0, int customWidth = 0, int customHeight = 0, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Begins execution of the currently loaded method by simulating a click on the Start control button.
+    /// Starts the loaded method.
     /// </summary>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous start command operation.</returns>
-    /// <exception cref="System.InvalidOperationException">Thrown when the target process window cannot be found.</exception>
+    /// <exception cref="System.InvalidOperationException">Run Control is not running, or Start is not available.</exception>
+    /// <exception cref="VenusDialogPendingException">A dialog waits for a response.</exception>
     Task StartRunAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Pauses active method execution by simulating a click on the Pause control button.
+    /// Pauses the running method.
     /// </summary>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous pause command operation.</returns>
-    /// <exception cref="System.InvalidOperationException">Thrown when the target application window is unavailable.</exception>
+    /// <exception cref="System.InvalidOperationException">Run Control is not running, or Pause is not available.</exception>
+    /// <exception cref="VenusDialogPendingException">A dialog waits for a response.</exception>
     Task PauseRunAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Resumes a paused execution run by confirming the execution pause modal dialog.
+    /// Resumes a paused run by pressing Resume in the pause dialog.
     /// </summary>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous resume operation.</returns>
+    /// <exception cref="System.InvalidOperationException">Run Control is not paused.</exception>
     Task ResumeRunAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Aborts an active execution run by clicking the Abort button and automatically confirming the confirmation prompt.
+    /// Requests an abort (through the toolbar, or the pause dialog while paused). Without <paramref name="confirm"/>,
+    /// the confirmation dialog is left open and returned, so a person can decide; with it, the abort is confirmed.
     /// </summary>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous abort operation.</returns>
-    /// <exception cref="System.InvalidOperationException">Thrown when the target main window cannot be found.</exception>
-    Task AbortRunAsync(CancellationToken cancellationToken = default);
+    Task<VenusAbortResult> AbortRunAsync(bool confirm = false, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Evaluates the active application state, checking for blocking error dialogs, window status, and loaded method details.
+    /// Reads the run state from open dialogs, toolbar command availability, and the status text.
     /// </summary>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A snapshot record containing system status information.</returns>
     Task<VenusSystemStatus> GetStatusAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists the open Run Control dialogs, topmost first.
+    /// </summary>
+    Task<IReadOnlyList<VenusDialogInfo>> GetDialogsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Presses a button of an open dialog, after checking that it is still the dialog the caller read.
+    /// </summary>
+    /// <param name="dialogHandle">Handle from <see cref="VenusDialogInfo.Handle"/>.</param>
+    /// <param name="buttonId">ID from <see cref="VenusDialogButton.Id"/>.</param>
+    /// <param name="fingerprint">Fingerprint from <see cref="VenusDialogInfo.Fingerprint"/>.</param>
+    /// <exception cref="System.InvalidOperationException">The dialog is gone or changed, or the button is disabled.</exception>
+    /// <exception cref="System.ArgumentException">The dialog has no such button.</exception>
+    Task<VenusDialogResponse> RespondToDialogAsync(long dialogHandle, int buttonId, string fingerprint, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Initiates a graceful shutdown request by closing the main window of all active target processes.
     /// </summary>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous shutdown operation.</returns>
     Task GracefulShutdownAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Automates loading a method file (.hsl) into Venus Run Control using standard keyboard shortcuts and file dialog injection.
+    /// Loads a method through the Open dialog. Dialogs that appear other than the Open dialog are not answered;
+    /// they are returned in <see cref="VenusLoadResult.PendingDialogs"/>.
     /// </summary>
     /// <param name="methodPath">The absolute path to the method file to load.</param>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous method loading operation.</returns>
-    /// <exception cref="System.InvalidOperationException">Thrown when the main application window is unreachable.</exception>
-    /// <exception cref="System.TimeoutException">Thrown when the file dialog fails to display within the designated timeout.</exception>
-    Task LoadMethodAsync(string methodPath, CancellationToken cancellationToken = default);
+    /// <exception cref="System.InvalidOperationException">Run Control is not running, or a method is running.</exception>
+    /// <exception cref="System.ArgumentException">The path is empty or cannot be entered into this Run Control.</exception>
+    /// <exception cref="System.TimeoutException">The Open dialog did not appear.</exception>
+    Task<VenusLoadResult> LoadMethodAsync(string methodPath, CancellationToken cancellationToken = default);
 }

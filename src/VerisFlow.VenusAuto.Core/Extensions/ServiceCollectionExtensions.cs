@@ -1,12 +1,12 @@
-﻿// Copyright (c) VerisFlow. All rights reserved.
+// Copyright (c) VerisFlow. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VerisFlow.VenusAuto.Core.Contracts;
 using VerisFlow.VenusAuto.Core.Internal;
-using VerisFlow.VenusAuto.Core.Services;
 using VerisFlow.VenusAuto.Core.Models;
+using VerisFlow.VenusAuto.Core.Services;
 
 namespace VerisFlow.VenusAuto.Core.Extensions;
 
@@ -16,11 +16,8 @@ namespace VerisFlow.VenusAuto.Core.Extensions;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the Venus Auto services and configures the required coordinate options.
+    /// Registers the Venus Auto services and binds <see cref="VenusAutoOptions"/> from the "VenusAutomation" section.
     /// </summary>
-    /// <param name="services">The service collection container to register services into.</param>
-    /// <param name="configuration">The root configuration provider containing options sections.</param>
-    /// <returns>The updated <see cref="IServiceCollection"/> instance for fluent chaining.</returns>
     public static IServiceCollection AddVenusAutomation(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddOptions<VenusAutoOptions>()
@@ -28,10 +25,11 @@ public static class ServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddTransient<IWindowMessenger, WindowMessenger>();
         services.AddTransient<IWindowOrchestrator, WindowOrchestrator>();
         services.AddTransient<ISilentSimulator, SilentSimulator>();
-        services.AddScoped<IVenusRunControlService, VenusRunControlService>();
         services.AddTransient<IDialogGuard, DialogGuard>();
+        services.AddScoped<IVenusRunControlService, VenusRunControlService>();
 
         return services;
     }
