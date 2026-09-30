@@ -59,7 +59,6 @@ namespace VerisFlow.LayParser.Core
 
             if (definition == null)
             {
-                Console.WriteLine($"File not found: {raw.FilePath}");
                 notes.Add(FormattableString.Invariant(
                     $"The labware definition '{raw.FilePath}' could not be read; dimensions, positions, and container data are unavailable."));
             }
@@ -80,7 +79,8 @@ namespace VerisFlow.LayParser.Core
                 }
                 else
                 {
-                    Console.WriteLine($"Container file not found: {properties.CntrFile}");
+                    notes.Add(FormattableString.Invariant(
+                        $"The container definition '{properties.CntrFile}' could not be read; container geometry is unavailable."));
                 }
             }
 
@@ -99,7 +99,6 @@ namespace VerisFlow.LayParser.Core
                     zCalculationIncomplete = true;
                     validationWarning = FormattableString.Invariant(
                         $"Critical physics warning: ZTransValue is 0 for Labware '{raw.Id}', but the container file is missing or unreadable. BaseMM could not be applied. FinalZ is likely incorrect and unsafe for physical execution.");
-                    Console.WriteLine(validationWarning);
                 }
             }
             else if (raw.ZTransValue == 1)
@@ -114,7 +113,6 @@ namespace VerisFlow.LayParser.Core
                     zCalculationIncomplete = true;
                     validationWarning = FormattableString.Invariant(
                         $"Critical physics warning: ZTransValue is 1 for Labware '{raw.Id}', but the container file is missing or unreadable. Cntr.1.base and BaseMM could not be applied. FinalZ is likely incorrect and unsafe for physical execution.");
-                    Console.WriteLine(validationWarning);
                 }
             }
             else if (raw.ZTransValue != 2)
@@ -378,9 +376,9 @@ namespace VerisFlow.LayParser.Core
                     content = HxCfgText.ReadAllText(path);
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.WriteLine($"Could not read {path}: {ex.Message}");
+                // Suppress direct console writing; unreadable files evaluate to null definition and are recorded in GeometryNotes.
             }
 
             files[path] = content;

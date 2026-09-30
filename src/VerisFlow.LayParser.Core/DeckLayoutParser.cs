@@ -16,8 +16,9 @@ namespace VerisFlow.LayParser.Core
         /// Reads deck layout data from a .lay file, extracting instrument and all labware instances in a single pass.
         /// </summary>
         /// <param name="deckLayoutFilePath">The full path to the .lay file.</param>
+        /// <param name="errors">Optional collection to receive any file reading or layout errors.</param>
         /// <returns>A DeckData object containing the instrument name and labware list. Empty if the file cannot be read.</returns>
-        public static DeckData GetDeckData(string deckLayoutFilePath)
+        public static DeckData GetDeckData(string deckLayoutFilePath, ICollection<string>? errors = null)
         {
             string content;
             try
@@ -26,8 +27,12 @@ namespace VerisFlow.LayParser.Core
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error reading deck layout file: {ex.Message}");
-                return new DeckData();
+                var message = FormattableString.Invariant($"Error reading deck layout file: {ex.Message}");
+                errors?.Add(message);
+
+                var failedData = new DeckData();
+                failedData.Errors.Add(message);
+                return failedData;
             }
 
             return ParseDeckContent(content);
@@ -97,10 +102,11 @@ namespace VerisFlow.LayParser.Core
         /// Parses a deck layout file to extract detailed labware information based on specific rules.
         /// </summary>
         /// <param name="deckLayoutFilePath">The full path to the .lay file.</param>
+        /// <param name="errors">Optional collection to receive any file reading errors.</param>
         /// <returns>A list of LabwareInfo objects.</returns>
-        public static List<LabwareInfo> GetLabwareInfo(string deckLayoutFilePath)
+        public static List<LabwareInfo> GetLabwareInfo(string deckLayoutFilePath, ICollection<string>? errors = null)
         {
-            return GetDeckData(deckLayoutFilePath).Labware;
+            return GetDeckData(deckLayoutFilePath, errors).Labware;
         }
 
         /// <summary>

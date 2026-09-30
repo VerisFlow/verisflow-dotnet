@@ -11,6 +11,11 @@ namespace VerisFlow.LayParser.Core
     {
         public string Instrument { get; set; } = string.Empty;
         public List<LabwareInfo> Labware { get; set; } = new List<LabwareInfo>();
+
+        /// <summary>
+        /// Errors encountered while loading or reading the deck layout file.
+        /// </summary>
+        public List<string> Errors { get; set; } = new List<string>();
     }
 
     /// <summary>

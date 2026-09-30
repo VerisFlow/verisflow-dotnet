@@ -99,6 +99,11 @@ namespace VerisFlow.LayParser.Core
         public bool IsZCalculationIncomplete { get; set; }
         public string ValidationWarning { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Indicates whether the labware has any geometry notes, incomplete Z calculation, or validation warnings.
+        /// </summary>
+        public bool HasWarnings => IsZCalculationIncomplete || !string.IsNullOrEmpty(ValidationWarning) || GeometryNotes.Count > 0;
+
         // ------------------------------------------------------------------ Added in 0.4.0
 
         /// <summary>SiteId from the layout; for carriers placed on tracks, "{width}T-{track}".</summary>
