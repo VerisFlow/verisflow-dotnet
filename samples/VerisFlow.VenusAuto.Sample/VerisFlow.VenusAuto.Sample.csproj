@@ -1,9 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>    
-    <TargetFramework>net9.0-windows</TargetFramework>    
-    <UseWPF>true</UseWPF>    
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
@@ -13,7 +13,11 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" />
-    <PackageReference Include="VerisFlow.VenusAuto.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests the library in this repository, not the published package. -->
+    <ProjectReference Include="..\..\src\VerisFlow.VenusAuto.Core\VerisFlow.VenusAuto.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,266 +1,292 @@
-﻿// Copyright (c) VerisFlow. All rights reserved.
+// Copyright (c) VerisFlow. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 using System;
-using System.Buffers;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
+using System.Globalization;
+using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using VerisFlow.VenusAuto.Core.Models;
 
 namespace VerisFlow.VenusAuto.Core.Internal;
 
 /// <summary>
-/// Internal contract for identifying and resolving blocking modal dialogs spawned by target process threads.
+/// Reads Run Control dialogs. Never answers a dialog; callers decide.
 /// </summary>
 internal interface IDialogGuard
 {
-    /// <summary>
-    /// Scans thread windows of the specified process to check for modal dialogs, auto-dismissing recoverable warnings when encountered.
-    /// </summary>
-    /// <param name="processId">The operating system process identifier to inspect.</param>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>A tuple containing flags indicating critical errors, paused states, and extracted dialog message text.</returns>
-    Task<(bool HasError, bool IsPaused, string? DialogMessage)> CheckAndHandleDialogsAsync(int processId, CancellationToken cancellationToken = default);
+    /// <summary>Visible dialogs (#32770) of the process, topmost first.</summary>
+    IReadOnlyList<VenusDialogInfo> GetDialogs(int processId, IntPtr mainWindow);
 
-    /// <summary>
-    /// Asynchronously waits until a modal dialog containing the expected window title or message text appears.
-    /// </summary>
-    /// <param name="processId">The operating system process identifier to search.</param>
-    /// <param name="expectedText">The text string to match within window title or child static controls.</param>
-    /// <param name="timeout">The maximum time period allowed for searching.</param>
-    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>The window handle (<see cref="IntPtr"/>) of the detected dialog, or <see cref="IntPtr.Zero"/> if not found within the timeout.</returns>
-    Task<IntPtr> WaitForDialogAsync(int processId, string expectedText, TimeSpan timeout, CancellationToken cancellationToken = default);
+    /// <summary>The dialog, or null when it is gone, not visible, not a dialog, or not owned by the process.</summary>
+    VenusDialogInfo? Inspect(IntPtr dialog, int processId, IntPtr mainWindow);
+
+    /// <summary>Waits for a dialog matching <paramref name="predicate"/>; null on timeout.</summary>
+    Task<VenusDialogInfo?> WaitForDialogAsync(
+        int processId,
+        IntPtr mainWindow,
+        Func<VenusDialogInfo, bool> predicate,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Waits until the dialog is closed or hidden; false on timeout.</summary>
+    Task<bool> WaitForCloseAsync(IntPtr dialog, TimeSpan timeout, CancellationToken cancellationToken = default);
 }
 
-/// <summary>
-/// Implementation for inspecting thread windows, capturing standard Win32 dialogs (#32770), and auto-responding to benign prompts.
-/// </summary>
-internal sealed partial class DialogGuard : IDialogGuard
+/// <inheritdoc />
+internal sealed class DialogGuard : IDialogGuard
 {
-    private readonly ILogger<DialogGuard> _logger;
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(150);
 
-    public DialogGuard(ILogger<DialogGuard> logger)
+    private const string StaticClass = "Static";
+    private const string EditClass = "Edit";
+    private const string ButtonClass = "Button";
+
+    // Button types (style & BS_TYPEMASK).
+    private const int BsDefPushButton = 0x1;
+    private const int BsCheckBox = 0x2;
+    private const int BsAutoCheckBox = 0x3;
+    private const int BsRadioButton = 0x4;
+    private const int Bs3State = 0x5;
+    private const int BsAuto3State = 0x6;
+    private const int BsGroupBox = 0x7;
+    private const int BsAutoRadioButton = 0x9;
+    private const int BsDefSplitButton = 0xD;
+    private const int BsDefCommandLink = 0xF;
+
+    private readonly IWindowMessenger _messenger;
+    private readonly RunControlIdentifiers _ids;
+
+    public DialogGuard(IWindowMessenger messenger, IOptions<VenusAutoOptions> options)
     {
-        _logger = logger;
+        _messenger = messenger;
+        _ids = options.Value.RunControlIds;
     }
 
-    /// <inheritdoc />
-    public Task<(bool HasError, bool IsPaused, string? DialogMessage)> CheckAndHandleDialogsAsync(int processId, CancellationToken cancellationToken = default)
+    public IReadOnlyList<VenusDialogInfo> GetDialogs(int processId, IntPtr mainWindow)
     {
-        try
+        var dialogs = new List<VenusDialogInfo>();
+
+        foreach (var hwnd in _messenger.GetTopLevelWindows(processId))
         {
-            var process = Process.GetProcessById(processId);
-            char[] classNameBuffer = ArrayPool<char>.Shared.Rent(256);
-
-            try
+            if (IsVisibleDialog(hwnd))
             {
-                foreach (ProcessThread thread in process.Threads)
-                {
-                    if (cancellationToken.IsCancellationRequested) break;
-
-                    bool isCriticalError = false;
-                    bool isPaused = false;
-                    string? dialogMessage = null;
-
-                    // Enumerate windows associated with individual process threads to locate unmanaged dialog handles
-                    NativeMethods.EnumThreadWindows((uint)thread.Id, (hwnd, lParam) =>
-                    {
-                        int classLength = NativeMethods.GetClassName(hwnd, classNameBuffer, classNameBuffer.Length);
-
-                        if (classLength > 0)
-                        {
-                            string className = new string(classNameBuffer, 0, classLength);
-
-                            if (className == NativeMethods.DialogClassName)
-                            {
-                                dialogMessage = ExtractDialogText(hwnd);
-                                LogDialogDetected(thread.Id, dialogMessage);
-
-                                if (IsRecoverableWarning(dialogMessage))
-                                {
-                                    LogRecoverableWarning();
-                                    // Synthesize Enter keypress to automatically bypass non-blocking modal warnings
-                                    NativeMethods.PostMessage(hwnd, NativeMethods.WM_KEYDOWN, (IntPtr)NativeMethods.VK_RETURN, IntPtr.Zero);
-                                    NativeMethods.PostMessage(hwnd, NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_RETURN, IntPtr.Zero);
-                                }
-                                else if (dialogMessage.Contains("Execution paused", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    isPaused = true;
-                                    LogPausedState();
-                                }
-                                else
-                                {
-                                    LogCriticalDialog();
-                                    isCriticalError = true;
-                                }
-                                return false;
-                            }
-                        }
-                        return true;
-                    }, IntPtr.Zero);
-
-                    if (isCriticalError || isPaused)
-                    {
-                        return Task.FromResult((isCriticalError, isPaused, dialogMessage));
-                    }
-                }
-            }
-            finally
-            {
-                ArrayPool<char>.Shared.Return(classNameBuffer);
+                dialogs.Add(Capture(hwnd, mainWindow));
             }
         }
-        catch (ArgumentException)
-        {
-            LogProcessExited(processId);
-        }
 
-        return Task.FromResult((false, false, (string?)null));
+        return dialogs;
     }
 
-    /// <inheritdoc />
-    public async Task<IntPtr> WaitForDialogAsync(int processId, string expectedText, TimeSpan timeout, CancellationToken cancellationToken = default)
+    public VenusDialogInfo? Inspect(IntPtr dialog, int processId, IntPtr mainWindow)
+        => _messenger.IsWindow(dialog) && _messenger.GetProcessId(dialog) == processId && IsVisibleDialog(dialog)
+            ? Capture(dialog, mainWindow)
+            : null;
+
+    public async Task<VenusDialogInfo?> WaitForDialogAsync(
+        int processId,
+        IntPtr mainWindow,
+        Func<VenusDialogInfo, bool> predicate,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
     {
-        var timeoutTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutTokenSource.CancelAfter(timeout);
-        var token = timeoutTokenSource.Token;
+        var deadline = DateTime.UtcNow + timeout;
 
-        char[] classNameBuffer = ArrayPool<char>.Shared.Rent(256);
-        char[] windowTitleBuffer = ArrayPool<char>.Shared.Rent(256);
-
-        try
+        while (true)
         {
-            while (!token.IsCancellationRequested)
+            var match = GetDialogs(processId, mainWindow).FirstOrDefault(predicate);
+            if (match is not null)
             {
-                try
+                return match;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                return null;
+            }
+
+            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<bool> WaitForCloseAsync(IntPtr dialog, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (_messenger.IsWindow(dialog) && _messenger.IsWindowVisible(dialog))
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+
+            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    private bool IsVisibleDialog(IntPtr hwnd)
+        => _messenger.IsWindowVisible(hwnd)
+           && string.Equals(_messenger.GetClassName(hwnd), NativeMethods.DialogClassName, StringComparison.Ordinal);
+
+    private VenusDialogInfo Capture(IntPtr dialog, IntPtr mainWindow)
+    {
+        var title = _messenger.GetText(dialog).Trim();
+        var owner = _messenger.GetOwner(dialog);
+        var messageLines = new List<string>();
+        var buttons = new List<VenusDialogButton>();
+        var options = new List<VenusDialogOption>();
+
+        foreach (var child in _messenger.GetDescendants(dialog))
+        {
+            if (!_messenger.IsWindowVisible(child))
+            {
+                continue;
+            }
+
+            var className = _messenger.GetClassName(child);
+            var style = _messenger.GetStyle(child);
+
+            if (string.Equals(className, StaticClass, StringComparison.OrdinalIgnoreCase))
+            {
+                AddLine(messageLines, _messenger.GetText(child));
+            }
+            else if (string.Equals(className, EditClass, StringComparison.OrdinalIgnoreCase))
+            {
+                // Read-only edits show text; editable ones are inputs (not handled yet).
+                if ((style & NativeMethods.ES_READONLY) != 0)
                 {
-                    var process = Process.GetProcessById(processId);
-                    IntPtr foundDialogHwnd = IntPtr.Zero;
-
-                    foreach (ProcessThread thread in process.Threads)
-                    {
-                        if (token.IsCancellationRequested) break;
-
-                        NativeMethods.EnumThreadWindows((uint)thread.Id, (hwnd, lParam) =>
-                        {
-                            int classLength = NativeMethods.GetClassName(hwnd, classNameBuffer, classNameBuffer.Length);
-
-                            if (classLength > 0)
-                            {
-                                string className = new string(classNameBuffer, 0, classLength);
-
-                                if (className == NativeMethods.DialogClassName)
-                                {
-                                    // NEW: Standard dialogs like "Open" use the Window Title.
-                                    int titleLength = NativeMethods.GetWindowText(hwnd, windowTitleBuffer, windowTitleBuffer.Length);
-                                    string windowTitle = titleLength > 0 ? new string(windowTitleBuffer, 0, titleLength) : string.Empty;
-
-                                    string dialogText = ExtractDialogText(hwnd);
-
-                                    if (windowTitle.Contains(expectedText, StringComparison.OrdinalIgnoreCase) ||
-                                        dialogText.Contains(expectedText, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        foundDialogHwnd = hwnd;
-                                        return false;
-                                    }
-                                }
-                            }
-                            return true;
-                        }, IntPtr.Zero);
-
-                        if (foundDialogHwnd != IntPtr.Zero) return foundDialogHwnd;
-                    }
+                    AddLine(messageLines, _messenger.GetText(child));
                 }
-                catch (ArgumentException) { break; }
+            }
+            else if (string.Equals(className, ButtonClass, StringComparison.OrdinalIgnoreCase))
+            {
+                var type = style & NativeMethods.BS_TYPEMASK;
+                var id = _messenger.GetControlId(child);
+                var text = RemoveMnemonics(_messenger.GetText(child));
+                var enabled = _messenger.IsWindowEnabled(child);
 
-                await Task.Delay(200, token);
+                switch (type)
+                {
+                    case BsGroupBox:
+                        break;
+
+                    case BsCheckBox:
+                    case BsAutoCheckBox:
+                    case BsRadioButton:
+                    case Bs3State:
+                    case BsAuto3State:
+                    case BsAutoRadioButton:
+                        options.Add(new VenusDialogOption(id, text, _messenger.GetCheckState(child) == 1, enabled));
+                        break;
+
+                    default:
+                        // Push, default push, owner-drawn, split, and command-link buttons.
+                        var isDefault = type == BsDefPushButton || type == BsDefSplitButton || type == BsDefCommandLink;
+                        buttons.Add(new VenusDialogButton(id, text, enabled, isDefault));
+                        break;
+                }
             }
         }
-        finally
-        {
-            ArrayPool<char>.Shared.Return(classNameBuffer);
-            ArrayPool<char>.Shared.Return(windowTitleBuffer);
-        }
 
-        return IntPtr.Zero;
+        var blocksMainWindow = mainWindow != IntPtr.Zero
+            && (owner == mainWindow || !_messenger.IsWindowEnabled(mainWindow));
+
+        return new VenusDialogInfo(
+            dialog.ToInt64(),
+            owner.ToInt64(),
+            Classify(dialog, buttons),
+            title,
+            string.Join("\n", messageLines),
+            buttons,
+            options,
+            blocksMainWindow,
+            ComputeFingerprint(dialog, title, buttons.Select(b => b.Id).Concat(options.Select(o => o.Id))));
     }
 
     /// <summary>
-    /// Traverses child controls of a dialog window to aggregate text content from all Static text elements.
+    /// Recognizes a dialog by its button and control IDs, which do not depend on the UI language.
     /// </summary>
-    private static string ExtractDialogText(IntPtr dialogHwnd)
+    private VenusDialogKind Classify(IntPtr dialog, IReadOnlyList<VenusDialogButton> buttons)
     {
-        var textParts = new List<string>();
-        // Pin memory handle to pass collection context safely into unmanaged EnumChildWindows callback
-        var listHandle = GCHandle.Alloc(textParts);
+        bool Has(int id) => id > 0 && buttons.Any(button => button.Id == id);
 
-        char[] childClassBuffer = ArrayPool<char>.Shared.Rent(256);
-        char[] childTextBuffer = ArrayPool<char>.Shared.Rent(2048);
-
-        try
+        if (Has(_ids.PausedResumeButton) && Has(_ids.PausedAbortButton))
         {
-            NativeMethods.EnumChildWindows(dialogHwnd, (childHwnd, lParam) =>
+            return VenusDialogKind.Paused;
+        }
+
+        if (Has(_ids.AbortConfirmButton) && Has(_ids.AbortCancelButton))
+        {
+            return VenusDialogKind.AbortConfirmation;
+        }
+
+        if (_ids.FileNameControl > 0 && _messenger.FindDescendant(dialog, null, _ids.FileNameControl) != IntPtr.Zero)
+        {
+            return VenusDialogKind.FileOpen;
+        }
+
+        return VenusDialogKind.Unknown;
+    }
+
+    private static void AddLine(List<string> lines, string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length > 0)
+        {
+            lines.Add(trimmed);
+        }
+    }
+
+    /// <summary>"&amp;Abort" becomes "Abort"; "&amp;&amp;" stays a literal ampersand.</summary>
+    private static string RemoveMnemonics(string text)
+    {
+        var result = new StringBuilder(text.Length);
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '&')
             {
-                int classLength = NativeMethods.GetClassName(childHwnd, childClassBuffer, childClassBuffer.Length);
-
-                if (classLength > 0)
+                if (i + 1 < text.Length && text[i + 1] == '&')
                 {
-                    string childClass = new string(childClassBuffer, 0, classLength);
-
-                    if (childClass == "Static")
-                    {
-                        int textLength = NativeMethods.GetWindowText(childHwnd, childTextBuffer, childTextBuffer.Length);
-
-                        if (textLength > 0)
-                        {
-                            string childText = new string(childTextBuffer, 0, textLength);
-                            var currentList = GCHandle.FromIntPtr(lParam).Target as List<string>;
-                            currentList?.Add(childText);
-                        }
-                    }
+                    result.Append('&');
+                    i++;
                 }
-                return true;
-            }, GCHandle.ToIntPtr(listHandle));
-        }
-        finally
-        {
-            if (listHandle.IsAllocated) listHandle.Free();
-            ArrayPool<char>.Shared.Return(childClassBuffer);
-            ArrayPool<char>.Shared.Return(childTextBuffer);
+
+                continue;
+            }
+
+            result.Append(text[i]);
         }
 
-        return string.Join(" | ", textParts).Trim();
+        return result.ToString().Trim();
     }
 
     /// <summary>
-    /// Evaluates extracted dialog text to classify whether the message represents an auto-dismissible warning.
+    /// Handle, title, and control IDs; the message is left out because dialogs may update it (e.g. countdowns).
+    /// The same 16 uppercase hex characters on every target framework.
     /// </summary>
-    private static bool IsRecoverableWarning(string text)
+    private static string ComputeFingerprint(IntPtr dialog, string title, IEnumerable<int> controlIds)
     {
-        var lowerText = text.ToLowerInvariant();
-        return lowerText.Contains("warning") ||
-               lowerText.Contains("tip") ||
-               lowerText.Contains("overwrite") ||
-               lowerText.Contains("success");
+        var source = dialog.ToInt64().ToString(CultureInfo.InvariantCulture)
+            + "|" + title
+            + "|" + string.Join(",", controlIds.OrderBy(id => id).Select(id => id.ToString(CultureInfo.InvariantCulture)));
+
+        var bytes = Encoding.UTF8.GetBytes(source);
+
+#if NET5_0_OR_GREATER
+        return Convert.ToHexString(SHA256.HashData(bytes), 0, 8);
+#else
+        using (var sha = SHA256.Create())
+        {
+            var hash = sha.ComputeHash(bytes);
+            return BitConverter.ToString(hash, 0, 8).Replace("-", string.Empty);
+        }
+#endif
     }
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Dialog detected on thread {ThreadId}. Text: '{Text}'")]
-    private partial void LogDialogDetected(int threadId, string text);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Classified as recoverable warning. Sending silent ENTER to dismiss.")]
-    private partial void LogRecoverableWarning();
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Classified as paused state. Leaving dialog open.")]
-    private partial void LogPausedState();
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Classified as CRITICAL blocking dialog.")]
-    private partial void LogCriticalDialog();
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Process {ProcessId} exited while checking for dialogs.")]
-    private partial void LogProcessExited(int processId);
 }

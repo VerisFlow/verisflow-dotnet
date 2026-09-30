@@ -1,11 +1,15 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
+using Microsoft.Extensions.DependencyInjection;
 using VerisFlow.VenusAuto.Core.Contracts;
 using VerisFlow.VenusAuto.Core.Models;
 using VerisFlow.VenusAuto.Sample.Models;
@@ -14,322 +18,314 @@ using VerisFlow.VenusAuto.Sample.Native;
 namespace VerisFlow.VenusAuto.Sample.ViewModels
 {
     /// <summary>
-    /// ViewModel managing UI automation probing, Win32 action testing, and interaction with the Venus execution engine.
+    /// Test bench for VerisFlow.VenusAuto.Core: window capture, raw input tests, run commands, method loading,
+    /// and dialog inspection/response.
     /// </summary>
-    public class MainViewModel : INotifyPropertyChanged
+    /// <remarks>
+    /// Each operation resolves the service in a new scope, so edits to appsettings.json (e.g. setting a command ID to 0
+    /// to test the coordinate fallback) apply to the next operation without restarting.
+    /// </remarks>
+    public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
-        private CaptureSnapshot? _currentCapture;
-        private string _testInputText = string.Empty;
-        private readonly IVenusRunControlService _venusService;
+        private const int MaxLogLines = 500;
 
-        /// <summary>
-        /// Gets or sets the snapshot of the currently captured UI element and screen state.
-        /// </summary>
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly DispatcherTimer _dialogTimer;
+        private readonly Queue<string> _logLines = new();
+
+        private CaptureSnapshot? _currentCapture;
+        private string _testInputText = "{F5}";
+        private string _methodFilePath = string.Empty;
+        private string _logText = string.Empty;
+        private string _dialogSummary = "Not read yet. Use Read Dialogs or enable auto-refresh.";
+        private string _dialogKey = string.Empty;
+        private bool _isBusy;
+        private bool _autoRefreshDialogs;
+        private bool _refreshingDialogs;
+        private int _lastDialogCount = -1;
+
+        public MainViewModel(IServiceScopeFactory scopeFactory)
+        {
+            _scopeFactory = scopeFactory;
+
+            _dialogTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _dialogTimer.Tick += async (_, _) => await RefreshDialogsAsync(quiet: true);
+
+            TestClickCommand = new RelayCommand(_ => ExecuteTestClick(), _ => HasCapture);
+            TestTextCommand = new RelayCommand(_ => ExecuteTestText(), _ => HasCapture);
+
+            StartCommand = new RelayCommand(async _ => await RunAsync("Start", service => service.StartRunAsync()), _ => !IsBusy);
+            StatusCommand = new RelayCommand(async _ => await RunAsync("Status", ReadStatusAsync), _ => !IsBusy);
+            PauseCommand = new RelayCommand(async _ => await RunAsync("Pause", service => service.PauseRunAsync()), _ => !IsBusy);
+            ResumeCommand = new RelayCommand(async _ => await RunAsync("Resume", service => service.ResumeRunAsync()), _ => !IsBusy);
+            EnsureStartedCommand = new RelayCommand(async _ => await RunAsync("Ensure started", service => service.EnsureProcessStartedAsync()), _ => !IsBusy);
+            ArrangeWindowCommand = new RelayCommand(async _ => await RunAsync("Arrange window (right half)", service => service.ArrangeWindowAsync(WindowLayoutPreset.RightHalf)), _ => !IsBusy);
+            RequestAbortCommand = new RelayCommand(async _ => await RunAsync("Request abort", service => AbortAsync(service, confirm: false)), _ => !IsBusy);
+            ConfirmAbortCommand = new RelayCommand(async _ => await ConfirmAbortAsync(), _ => !IsBusy);
+
+            BrowseMethodCommand = new RelayCommand(_ => ExecuteBrowseMethod());
+            LoadMethodCommand = new RelayCommand(async _ => await LoadMethodAsync(), _ => !IsBusy && !string.IsNullOrWhiteSpace(MethodFilePath));
+
+            ReadDialogsCommand = new RelayCommand(async _ => await RefreshDialogsAsync(quiet: false));
+            ClearLogCommand = new RelayCommand(_ => ClearLog());
+
+            Log("Ready. Commands use RunControlIds from appsettings.json next to the executable; set an ID to 0 to test the coordinate fallback.");
+        }
+
+        // ------------------------------------------------------------------ Bindable state
+
         public CaptureSnapshot? CurrentCapture
         {
             get => _currentCapture;
-            set { _currentCapture = value; OnPropertyChanged(); }
+            private set { _currentCapture = value; OnPropertyChanged(); }
         }
 
-        /// <summary>
-        /// Gets or sets the text input used for key simulation testing.
-        /// </summary>
         public string TestInputText
         {
             get => _testInputText;
             set { _testInputText = value; OnPropertyChanged(); }
         }
 
-        /// <summary>
-        /// Gets the command that triggers a simulated click on the captured UI target.
-        /// </summary>
-        public ICommand TestClickCommand { get; }
-
-        /// <summary>
-        /// Gets the command that sends keyboard input to the captured UI target.
-        /// </summary>
-        public ICommand TestTextCommand { get; }
-
-        private string _integrationTestOutput = "Ready to test Venus Auto Engine...";
-
-        /// <summary>
-        /// Gets or sets the output log string displayed for integration test operations.
-        /// </summary>
-        public string IntegrationTestOutput
-        {
-            get => _integrationTestOutput;
-            set { _integrationTestOutput = value; OnPropertyChanged(); }
-        }
-
-        private string _methodFilePath = string.Empty;
-
-        /// <summary>
-        /// Gets or sets the file path of the Venus method file to be loaded.
-        /// </summary>
         public string MethodFilePath
         {
             get => _methodFilePath;
             set { _methodFilePath = value; OnPropertyChanged(); }
         }
 
-        /// <summary>
-        /// Gets the command that initiates method execution via the Venus service.
-        /// </summary>
-        public ICommand TestEngineStartCommand { get; }
-
-        /// <summary>
-        /// Gets the command that queries the current engine execution status.
-        /// </summary>
-        public ICommand TestEngineStatusCommand { get; }
-
-        /// <summary>
-        /// Gets the command that pauses the running method execution.
-        /// </summary>
-        public ICommand TestEnginePauseCommand { get; }
-
-        /// <summary>
-        /// Gets the command that resumes a paused method execution.
-        /// </summary>
-        public ICommand TestEngineResumeCommand { get; }
-
-        /// <summary>
-        /// Gets the command that aborts the currently running method execution.
-        /// </summary>
-        public ICommand TestEngineAbortCommand { get; }
-
-        /// <summary>
-        /// Gets the command that opens a file dialog to select a method file.
-        /// </summary>
-        public ICommand BrowseMethodCommand { get; }
-
-        /// <summary>
-        /// Gets the command that loads the selected method file into the Venus engine.
-        /// </summary>
-        public ICommand TestEngineLoadCommand { get; }
-
-        /// <summary>
-        /// Gets the command that verifies and ensures the Venus process is running.
-        /// </summary>
-        public ICommand TestEnsureStartedCommand { get; }
-
-        /// <summary>
-        /// Gets the command that arranges the target window using predefined layouts.
-        /// </summary>
-        public ICommand TestArrangeWindowCommand { get; }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="MainViewModel"/> class.
-        /// </summary>
-        /// <param name="venusService">The service interface for controlling Venus engine execution.</param>
-        public MainViewModel(IVenusRunControlService venusService)
+        public string LogText
         {
-            _venusService = venusService;
-            TestClickCommand = new RelayCommand(ExecuteTestClick, CanExecuteTest);
-            TestTextCommand = new RelayCommand(ExecuteTestText, CanExecuteTest);
-            TestEngineStartCommand = new RelayCommand(async _ => await ExecuteEngineStartAsync());
-            TestEngineStatusCommand = new RelayCommand(async _ => await ExecuteEngineStatusAsync());
-            TestEnginePauseCommand = new RelayCommand(async _ => await ExecuteEnginePauseAsync());
-            TestEngineResumeCommand = new RelayCommand(async _ => await ExecuteEngineResumeAsync());
-            TestEngineAbortCommand = new RelayCommand(async _ => await ExecuteEngineAbortAsync());
-            BrowseMethodCommand = new RelayCommand(_ => ExecuteBrowseMethod());
-            TestEngineLoadCommand = new RelayCommand(async _ => await ExecuteEngineLoadAsync());
-            TestEnsureStartedCommand = new RelayCommand(async _ => await ExecuteEnsureStartedAsync());
-            TestArrangeWindowCommand = new RelayCommand(async _ => await ExecuteArrangeWindowAsync());
+            get => _logText;
+            private set { _logText = value; OnPropertyChanged(); }
         }
 
+        public bool IsBusy
+        {
+            get => _isBusy;
+            private set { _isBusy = value; OnPropertyChanged(); }
+        }
+
+        public bool AutoRefreshDialogs
+        {
+            get => _autoRefreshDialogs;
+            set
+            {
+                _autoRefreshDialogs = value;
+                OnPropertyChanged();
+
+                if (value)
+                {
+                    _dialogTimer.Start();
+                    Log("Dialog auto-refresh on.");
+                }
+                else
+                {
+                    _dialogTimer.Stop();
+                    Log("Dialog auto-refresh off.");
+                }
+            }
+        }
+
+        public ObservableCollection<DialogItemViewModel> Dialogs { get; } = new();
+
+        public string DialogSummary
+        {
+            get => _dialogSummary;
+            private set { _dialogSummary = value; OnPropertyChanged(); }
+        }
+
+        private bool HasCapture => CurrentCapture != null && CurrentCapture.Hwnd != IntPtr.Zero;
+
+        // ------------------------------------------------------------------ Commands
+
+        public ICommand TestClickCommand { get; }
+
+        public ICommand TestTextCommand { get; }
+
+        public ICommand StartCommand { get; }
+
+        public ICommand StatusCommand { get; }
+
+        public ICommand PauseCommand { get; }
+
+        public ICommand ResumeCommand { get; }
+
+        public ICommand EnsureStartedCommand { get; }
+
+        public ICommand ArrangeWindowCommand { get; }
+
+        public ICommand RequestAbortCommand { get; }
+
+        public ICommand ConfirmAbortCommand { get; }
+
+        public ICommand BrowseMethodCommand { get; }
+
+        public ICommand LoadMethodCommand { get; }
+
+        public ICommand ReadDialogsCommand { get; }
+
+        public ICommand ClearLogCommand { get; }
+
+        // ------------------------------------------------------------------ Capture (F2)
+
         /// <summary>
-        /// Captures UI element details, coordinates, and pixel color under the current mouse cursor position.
+        /// Captures the deepest window under the cursor, including disabled controls, with its IDs and relations.
         /// </summary>
-        // Executes the capture logic when the global hotkey is triggered.
         public void ExecuteCapture()
         {
             NativeMethods.GetCursorPos(out NativeMethods.POINT screenPoint);
-            IntPtr targetHwnd = NativeMethods.WindowFromPoint(screenPoint);
 
-            if (targetHwnd == IntPtr.Zero) return;
+            IntPtr target = NativeMethods.WindowFromPoint(screenPoint);
+            if (target == IntPtr.Zero) return;
 
-            char[] className = new char[256];
-            int classLength = NativeMethods.GetClassName(targetHwnd, className, className.Length);
-
-            char[] windowText = new char[1024];
-            int textLength = NativeMethods.GetWindowText(targetHwnd, windowText, windowText.Length);
-
-            IntPtr parentHwnd = NativeMethods.GetParent(targetHwnd);
-
-            // Traverse up the window tree to find the top-level main window
-            IntPtr rootWindowHwnd = NativeMethods.GetAncestor(targetHwnd, NativeMethods.GA_ROOT);
-            if (rootWindowHwnd == IntPtr.Zero)
+            // WindowFromPoint skips disabled controls; walk down with ChildWindowFromPointEx to find them.
+            for (var depth = 0; depth < 32; depth++)
             {
-                rootWindowHwnd = targetHwnd;
+                var clientPoint = screenPoint;
+                NativeMethods.ScreenToClient(target, ref clientPoint);
+
+                var child = NativeMethods.ChildWindowFromPointEx(target, clientPoint, NativeMethods.CWP_SKIPINVISIBLE | NativeMethods.CWP_SKIPTRANSPARENT);
+                if (child == IntPtr.Zero || child == target) break;
+                target = child;
             }
 
-            NativeMethods.POINT clientPoint = screenPoint;
+            var className = new char[256];
+            var classLength = NativeMethods.GetClassName(target, className, className.Length);
 
-            // Calculate coordinates relative to the top-level main window instead of the immediate target control
-            NativeMethods.ScreenToClient(rootWindowHwnd, ref clientPoint);
+            var windowText = new char[1024];
+            var textLength = NativeMethods.GetWindowText(target, windowText, windowText.Length);
+
+            var root = NativeMethods.GetAncestor(target, NativeMethods.GA_ROOT);
+            if (root == IntPtr.Zero) root = target;
+
+            var relativePoint = screenPoint;
+            NativeMethods.ScreenToClient(root, ref relativePoint);
+
+            NativeMethods.GetWindowThreadProcessId(target, out var processId);
 
             IntPtr hdc = NativeMethods.GetDC(IntPtr.Zero);
-            uint pixelColor = NativeMethods.GetPixel(hdc, screenPoint.X, screenPoint.Y);
+            uint pixel = NativeMethods.GetPixel(hdc, screenPoint.X, screenPoint.Y);
             _ = NativeMethods.ReleaseDC(IntPtr.Zero, hdc);
 
-            Color color = Color.FromArgb(
-                255,
-                (byte)(pixelColor & 0x000000FF),
-                (byte)((pixelColor & 0x0000FF00) >> 8),
-                (byte)((pixelColor & 0x00FF0000) >> 16));
-
-            // Update the bound property
             CurrentCapture = new CaptureSnapshot
             {
-                Hwnd = targetHwnd,
-                ParentHwnd = parentHwnd,
+                Hwnd = target,
+                ParentHwnd = NativeMethods.GetParent(target),
+                RootHwnd = root,
+                RootOwnerHwnd = NativeMethods.GetWindow(root, NativeMethods.GW_OWNER),
                 ClassName = classLength > 0 ? new string(className, 0, classLength) : string.Empty,
                 WindowText = textLength > 0 ? new string(windowText, 0, textLength) : string.Empty,
+                ControlId = target == root ? 0 : NativeMethods.GetDlgCtrlID(target),
+                Style = NativeMethods.GetWindowLong(target, NativeMethods.GWL_STYLE),
+                ProcessId = processId,
                 AbsoluteX = screenPoint.X,
                 AbsoluteY = screenPoint.Y,
-                RelativeX = clientPoint.X,
-                RelativeY = clientPoint.Y,
-                PixelColor = color
+                RelativeX = relativePoint.X,
+                RelativeY = relativePoint.Y,
+                PixelColor = Color.FromArgb(
+                    255,
+                    (byte)(pixel & 0x000000FF),
+                    (byte)((pixel & 0x0000FF00) >> 8),
+                    (byte)((pixel & 0x00FF0000) >> 16))
             };
+
+            Log($"Captured {CurrentCapture.ClassName} {CurrentCapture.HwndText}, control ID {CurrentCapture.ControlIdText}, text '{CurrentCapture.WindowText}'.");
         }
 
-        /// <summary>
-        /// Validates whether action commands can be executed against a valid captured window handle.
-        /// </summary>
-        /// <param name="parameter">Optional command parameter.</param>
-        /// <returns><c>true</c> if a valid window handle exists; otherwise, <c>false</c>.</returns>
-        private bool CanExecuteTest(object? parameter) => CurrentCapture != null && CurrentCapture.Hwnd != IntPtr.Zero;
+        // ------------------------------------------------------------------ Raw input tests
 
-        /// <summary>
-        /// Posts Win32 mouse down and mouse up messages to simulate a click at the relative coordinates of the captured target.
-        /// </summary>
-        /// <param name="parameter">Optional command parameter.</param>
-        private void ExecuteTestClick(object? parameter)
+        private void ExecuteTestClick()
         {
-            if (CurrentCapture == null || CurrentCapture.Hwnd == IntPtr.Zero) return;
+            if (!HasCapture) return;
 
-            IntPtr hwnd = CurrentCapture.Hwnd;
-            int x = CurrentCapture.RelativeX;
-            int y = CurrentCapture.RelativeY;
+            var capture = CurrentCapture!;
+            var lParam = (IntPtr)((capture.RelativeY << 16) | (capture.RelativeX & 0xFFFF));
 
-            // In Win32, coordinates for mouse messages are packed into the lParam parameter.
-            // Low-order word specifies the x-coordinate, high-order word specifies the y-coordinate.
-            IntPtr lParam = (IntPtr)((y << 16) | (x & 0xFFFF));
-
-            // Send silent mouse down, then mouse up
-            NativeMethods.PostMessage(hwnd, NativeMethods.WM_LBUTTONDOWN, (IntPtr)NativeMethods.MK_LBUTTON, lParam);
-            NativeMethods.PostMessage(hwnd, NativeMethods.WM_LBUTTONUP, IntPtr.Zero, lParam);
+            NativeMethods.PostMessage(capture.Hwnd, NativeMethods.WM_LBUTTONDOWN, (IntPtr)NativeMethods.MK_LBUTTON, lParam);
+            NativeMethods.PostMessage(capture.Hwnd, NativeMethods.WM_LBUTTONUP, IntPtr.Zero, lParam);
+            Log($"Posted a click to {capture.HwndText} at {capture.RelativeText}.");
         }
 
-        /// <summary>
-        /// Sends simulated key press messages to the target window based on the provided input text.
-        /// </summary>
-        /// <param name="parameter">Optional command parameter.</param>
-        private void ExecuteTestText(object? parameter)
+        private void ExecuteTestText()
         {
-            if (CurrentCapture == null || CurrentCapture.Hwnd == IntPtr.Zero) return;
+            if (!HasCapture) return;
 
-            // Simple parser for {F5} text input
             if (TestInputText.Trim().Equals("{F5}", StringComparison.OrdinalIgnoreCase))
             {
-                IntPtr hwnd = CurrentCapture.Hwnd;
+                var hwnd = CurrentCapture!.Hwnd;
                 NativeMethods.PostMessage(hwnd, NativeMethods.WM_KEYDOWN, (IntPtr)NativeMethods.VK_F5, IntPtr.Zero);
                 NativeMethods.PostMessage(hwnd, NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_F5, IntPtr.Zero);
+                Log($"Posted F5 to {CurrentCapture.HwndText}.");
             }
             else
             {
-                MessageBox.Show("For this testing phase, please type '{F5}' exactly to test sending the F5 key.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                Log("Only {F5} is supported by the key test.");
             }
         }
 
-        /// <summary>
-        /// Asynchronously starts method execution via the Venus service.
-        /// </summary>
-        private async Task ExecuteEngineStartAsync()
+        // ------------------------------------------------------------------ Library operations
+
+        private async Task ReadStatusAsync(IVenusRunControlService service)
         {
-            IntegrationTestOutput = "Executing StartRunAsync()...";
-            try
+            var status = await service.GetStatusAsync();
+
+            Log($"State: {status.State} | status text: '{status.RawStatusText}' | method: {status.LoadedMethodName ?? "-"}");
+
+            var commands = status.Commands;
+            Log(commands is null
+                ? "Commands: toolbar state not available."
+                : $"Commands: Start={YesNo(commands.CanStart)} Pause={YesNo(commands.CanPause)} Step={YesNo(commands.CanSingleStep)} Abort={YesNo(commands.CanAbort)}");
+
+            if (status.HasErrorDialog)
             {
-                await _venusService.StartRunAsync();
-                IntegrationTestOutput = "StartRunAsync() completed successfully.";
+                Log($"Waiting for the user: {status.ErrorMessage}");
             }
-            catch (Exception ex)
-            {
-                IntegrationTestOutput = $"Error: {ex.Message}";
-            }
+
+            ShowDialogs(status.Dialogs);
         }
 
-        /// <summary>
-        /// Asynchronously queries and logs the execution status from the Venus service.
-        /// </summary>
-        private async Task ExecuteEngineStatusAsync()
+        private async Task AbortAsync(IVenusRunControlService service, bool confirm)
         {
-            IntegrationTestOutput = "Executing GetStatusAsync()...";
-            try
-            {
-                var status = await _venusService.GetStatusAsync();
-                IntegrationTestOutput = $"Status: {status.State}\nHasError: {status.HasErrorDialog}\nMsg: {status.RawStatusText}\nMethod: {status.LoadedMethodName ?? "None"}\nError Details: {status.ErrorMessage ?? "None"}";
-            }
-            catch (Exception ex)
-            {
-                IntegrationTestOutput = $"Error: {ex.Message}";
-            }
+            var result = await service.AbortRunAsync(confirm);
+            Log($"Aborted: {result.Aborted}. {result.Detail}");
+            ShowDialogs(await service.GetDialogsAsync());
         }
 
-        /// <summary>
-        /// Asynchronously pauses the currently running Venus execution.
-        /// </summary>
-        private async Task ExecuteEnginePauseAsync()
+        private async Task ConfirmAbortAsync()
         {
-            IntegrationTestOutput = "Executing PauseRunAsync()...";
-            try
+            var answer = MessageBox.Show(
+                "Abort the run in Run Control and confirm the abort?",
+                "Confirm Abort",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (answer == MessageBoxResult.Yes)
             {
-                await _venusService.PauseRunAsync();
-                IntegrationTestOutput = "PauseRunAsync() completed successfully.";
-            }
-            catch (Exception ex)
-            {
-                IntegrationTestOutput = $"Error: {ex.Message}";
+                await RunAsync("Confirm abort", service => AbortAsync(service, confirm: true));
             }
         }
 
-        /// <summary>
-        /// Asynchronously resumes a paused Venus execution.
-        /// </summary>
-        private async Task ExecuteEngineResumeAsync()
+        private async Task LoadMethodAsync()
         {
-            IntegrationTestOutput = "Executing ResumeRunAsync()...";
-            try
+            var path = MethodFilePath;
+            await RunAsync("Load method", async service =>
             {
-                await _venusService.ResumeRunAsync();
-                IntegrationTestOutput = "ResumeRunAsync() completed successfully.";
-            }
-            catch (Exception ex)
-            {
-                IntegrationTestOutput = $"Error: {ex.Message}";
-            }
+                var result = await service.LoadMethodAsync(path);
+                Log($"Loaded: {result.Loaded} | method: {result.LoadedMethodName ?? "-"} | {result.Detail}");
+                ShowDialogs(result.PendingDialogs.Count > 0 ? result.PendingDialogs : await service.GetDialogsAsync());
+            });
         }
 
         /// <summary>
-        /// Asynchronously aborts the active Venus execution.
+        /// Presses a dialog button through the library; the dialog must still match the fingerprint that was read.
         /// </summary>
-        private async Task ExecuteEngineAbortAsync()
-        {
-            IntegrationTestOutput = "Executing AbortRunAsync()...";
-            try
+        public Task RespondAsync(VenusDialogInfo dialog, VenusDialogButton button)
+            => RunAsync($"Respond '{button.Text}' [{button.Id}] to '{dialog.Title}'", async service =>
             {
-                await _venusService.AbortRunAsync();
-                IntegrationTestOutput = "AbortRunAsync() completed successfully.";
-            }
-            catch (Exception ex)
-            {
-                IntegrationTestOutput = $"Error: {ex.Message}";
-            }
-        }
+                var response = await service.RespondToDialogAsync(dialog.Handle, button.Id, dialog.Fingerprint);
+                Log($"Dialog closed: {response.DialogClosed}. Dialogs open now: {response.OpenDialogs.Count}.");
+                ShowDialogs(response.OpenDialogs);
+            });
 
-        /// <summary>
-        /// Displays an open file dialog allowing the user to select a Venus method file.
-        /// </summary>
         private void ExecuteBrowseMethod()
         {
             var dialog = new Microsoft.Win32.OpenFileDialog
@@ -345,120 +341,134 @@ namespace VerisFlow.VenusAuto.Sample.ViewModels
         }
 
         /// <summary>
-        /// Asynchronously loads the selected method file into the Venus engine.
+        /// Runs one library operation in its own scope (fresh options), one at a time, logging the outcome.
         /// </summary>
-        private async Task ExecuteEngineLoadAsync()
+        private async Task RunAsync(string name, Func<IVenusRunControlService, Task> action)
         {
-            if (string.IsNullOrWhiteSpace(MethodFilePath))
+            if (IsBusy)
             {
-                IntegrationTestOutput = "Error: Please select a method file first.";
+                Log($"{name}: skipped, another operation is still running.");
                 return;
             }
 
-            IntegrationTestOutput = $"Executing LoadMethodAsync('{MethodFilePath}')...";
+            IsBusy = true;
+            Log($"{name}...");
+
             try
             {
-                await _venusService.LoadMethodAsync(MethodFilePath);
-                IntegrationTestOutput = "LoadMethodAsync() sequence initiated.";
+                using var scope = _scopeFactory.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<IVenusRunControlService>();
+                await action(service);
+                Log($"{name}: done.");
+            }
+            catch (VenusDialogPendingException ex)
+            {
+                Log($"{name}: {ex.Message}");
+                ShowDialogs(ex.Dialogs);
             }
             catch (Exception ex)
             {
-                IntegrationTestOutput = $"Error: {ex.Message}";
+                Log($"{name} failed ({ex.GetType().Name}): {ex.Message}");
+            }
+            finally
+            {
+                IsBusy = false;
             }
         }
 
-        /// <summary>
-        /// Asynchronously verifies that the target Venus process is running.
-        /// </summary>
-        private async Task ExecuteEnsureStartedAsync()
+        // ------------------------------------------------------------------ Dialogs
+
+        private async Task RefreshDialogsAsync(bool quiet)
         {
-            IntegrationTestOutput = "Executing EnsureProcessStartedAsync()...";
+            if (_refreshingDialogs) return;
+            _refreshingDialogs = true;
+
             try
             {
-                await _venusService.EnsureProcessStartedAsync();
-                IntegrationTestOutput = "EnsureProcessStartedAsync() completed. Process is running.";
+                using var scope = _scopeFactory.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<IVenusRunControlService>();
+                var dialogs = await service.GetDialogsAsync();
+
+                if (!quiet || dialogs.Count != _lastDialogCount)
+                {
+                    Log($"{dialogs.Count} dialog(s) open.");
+                }
+
+                ShowDialogs(dialogs);
             }
             catch (Exception ex)
             {
-                IntegrationTestOutput = $"Error: {ex.Message}";
+                if (!quiet)
+                {
+                    Log($"Reading dialogs failed ({ex.GetType().Name}): {ex.Message}");
+                }
+            }
+            finally
+            {
+                _refreshingDialogs = false;
             }
         }
 
         /// <summary>
-        /// Asynchronously aligns the target window layout on screen.
+        /// Shows the dialogs; the list is only rebuilt when something changed, so buttons do not flicker on auto-refresh.
         /// </summary>
-        private async Task ExecuteArrangeWindowAsync()
+        private void ShowDialogs(IReadOnlyList<VenusDialogInfo> dialogs)
         {
-            IntegrationTestOutput = "Executing ArrangeWindowAsync(RightHalf)...";
-            try
+            _lastDialogCount = dialogs.Count;
+
+            var key = string.Join(";", dialogs.Select(d =>
+                $"{d.Fingerprint}|{d.Message}|{string.Join(",", d.Buttons.Select(b => b.Enabled ? "1" : "0"))}|{string.Join(",", d.Options.Select(o => o.Checked ? "1" : "0"))}"));
+
+            if (key == _dialogKey) return;
+            _dialogKey = key;
+
+            Dialogs.Clear();
+            foreach (var dialog in dialogs)
             {
-                // We test the RightHalf preset here. You can change this to Center or Maximize for other tests.
-                await _venusService.ArrangeWindowAsync(WindowLayoutPreset.RightHalf);
-                IntegrationTestOutput = "ArrangeWindowAsync() completed. Window moved to the right half of the screen.";
+                Dialogs.Add(new DialogItemViewModel(dialog, this));
             }
-            catch (Exception ex)
-            {
-                IntegrationTestOutput = $"Error: {ex.Message}";
-            }
+
+            DialogSummary = dialogs.Count == 0
+                ? "No Run Control dialog is open."
+                : $"{dialogs.Count} dialog(s) open, topmost first. Nothing is answered automatically; choose a button to respond.";
         }
 
-        /// <summary>
-        /// Occurs when a property value changes.
-        /// </summary>
+        // ------------------------------------------------------------------ Log
+
+        private void Log(string message)
+        {
+            _logLines.Enqueue($"{DateTime.Now:HH:mm:ss.fff}  {message}");
+            while (_logLines.Count > MaxLogLines)
+            {
+                _logLines.Dequeue();
+            }
+
+            LogText = string.Join(Environment.NewLine, _logLines);
+        }
+
+        private void ClearLog()
+        {
+            _logLines.Clear();
+            LogText = string.Empty;
+        }
+
+        private static string YesNo(bool? value) => value switch
+        {
+            true => "yes",
+            false => "no",
+            null => "?"
+        };
+
+        // ------------------------------------------------------------------ Infrastructure
+
+        public void Dispose() => _dialogTimer.Stop();
+
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        /// <summary>
-        /// Raises the <see cref="PropertyChanged"/> event and triggers command requery updates.
-        /// </summary>
-        /// <param name="name">The name of the property that changed.</param>
-        protected void OnPropertyChanged([CallerMemberName] string? name = null)
+        private void OnPropertyChanged([CallerMemberName] string? name = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-            // Force re-evaluation of commands
             CommandManager.InvalidateRequerySuggested();
         }
-    }
-
-    /// <summary>
-    /// A standard ICommand implementation for relaying actions to underlying viewmodel logic.
-    /// </summary>
-    // A standard ICommand implementation for relaying actions.
-    public class RelayCommand : ICommand
-    {
-        private readonly Action<object?> _execute;
-        private readonly Func<object?, bool>? _canExecute;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="RelayCommand"/> class.
-        /// </summary>
-        /// <param name="execute">The action to execute when the command is invoked.</param>
-        /// <param name="canExecute">The status predicate determining whether the command can execute.</param>
-        public RelayCommand(Action<object?> execute, Func<object?, bool>? canExecute = null)
-        {
-            _execute = execute;
-            _canExecute = canExecute;
-        }
-
-        /// <summary>
-        /// Occurs when changes occur that affect whether or not the command should execute.
-        /// </summary>
-        public event EventHandler? CanExecuteChanged
-        {
-            add { CommandManager.RequerySuggested += value; }
-            remove { CommandManager.RequerySuggested -= value; }
-        }
-
-        /// <summary>
-        /// Determines whether the command can execute in its current state.
-        /// </summary>
-        /// <param name="parameter">Data used by the command.</param>
-        /// <returns><c>true</c> if this command can be executed; otherwise, <c>false</c>.</returns>
-        public bool CanExecute(object? parameter) => _canExecute == null || _canExecute(parameter);
-
-        /// <summary>
-        /// Executes the command action.
-        /// </summary>
-        /// <param name="parameter">Data used by the command.</param>
-        public void Execute(object? parameter) => _execute(parameter);
     }
 }
