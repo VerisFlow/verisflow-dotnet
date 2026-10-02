@@ -75,6 +75,16 @@ public interface IVenusRunControlService
     Task<VenusDialogResponse> RespondToDialogAsync(long dialogHandle, int buttonId, string fingerprint, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Submits form values (inputs, options, dropdown selections) to an open dialog and activates the specified button.
+    /// </summary>
+    /// <param name="dialogHandle">Handle from <see cref="VenusDialogInfo.Handle"/>.</param>
+    /// <param name="submission">The payload containing inputs, option states, dropdown selections, and target button.</param>
+    /// <param name="fingerprint">Fingerprint from <see cref="VenusDialogInfo.Fingerprint"/>.</param>
+    /// <exception cref="System.InvalidOperationException">The dialog is gone or changed, or the target button is disabled.</exception>
+    /// <exception cref="System.ArgumentException">The specified button was not found.</exception>
+    Task<VenusDialogResponse> SubmitDialogAsync(long dialogHandle, VenusDialogSubmission submission, string fingerprint, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Initiates a graceful shutdown request by closing the main window of all active target processes.
     /// </summary>
     Task GracefulShutdownAsync(CancellationToken cancellationToken = default);

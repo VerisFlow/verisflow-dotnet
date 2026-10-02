@@ -20,9 +20,9 @@
         <SolidColorBrush x:Key="BorderColor" Color="#3E3E5A"/>
 
         <Style x:Key="ReadOnlyField" TargetType="TextBox">
-            <Setter Property="Background"               Value="#252538"/>
-            <Setter Property="Foreground"               Value="{StaticResource TextPrimary}"/>
-            <Setter Property="BorderBrush"              Value="{StaticResource BorderColor}"/>
+            <Setter Property="Background"                Value="#252538"/>
+            <Setter Property="Foreground"                Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush"               Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness"          Value="1"/>
             <Setter Property="Padding"                  Value="8,4"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -44,9 +44,9 @@
         </Style>
 
         <Style x:Key="EditableField" TargetType="TextBox">
-            <Setter Property="Background"               Value="#252538"/>
-            <Setter Property="Foreground"               Value="{StaticResource TextPrimary}"/>
-            <Setter Property="BorderBrush"              Value="{StaticResource BorderColor}"/>
+            <Setter Property="Background"                Value="#252538"/>
+            <Setter Property="Foreground"                Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush"               Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness"          Value="1"/>
             <Setter Property="Padding"                  Value="8,4"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -449,6 +449,21 @@
                                             <TextBlock Text="{Binding Message}" Foreground="{StaticResource TextPrimary}"
                                                        FontSize="12" TextWrapping="Wrap"/>
 
+                                            <!-- Dialog Inputs (File path, text, number fields) -->
+                                            <ItemsControl ItemsSource="{Binding Inputs}" Margin="0,6,0,0"
+                                                          Visibility="{Binding HasInputs, Converter={StaticResource BoolToVisibility}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,0,0,6">
+                                                            <TextBlock Text="{Binding DisplayLabel}" Style="{StaticResource FieldLabel}" Margin="0,2,0,2"/>
+                                                            <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
+                                                                     IsReadOnly="{Binding IsReadOnly}"
+                                                                     Style="{StaticResource EditableField}" Height="28"/>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
                                             <ItemsControl ItemsSource="{Binding Options}" Margin="0,6,0,0"
                                                           Visibility="{Binding HasOptions, Converter={StaticResource BoolToVisibility}}">
                                                 <ItemsControl.ItemTemplate>
@@ -458,19 +473,26 @@
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
 
-                                            <ItemsControl ItemsSource="{Binding Buttons}">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <WrapPanel/>
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Button Content="{Binding Label}" Command="{Binding Command}" ToolTip="{Binding ToolTip}"
-                                                                Style="{StaticResource SecondaryButton}" Height="28" Margin="0,8,6,0"/>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
+                                            <!-- Action and response buttons -->
+                                            <WrapPanel Margin="0,6,0,0">
+                                                <Button Content="Submit Form (OK)" Command="{Binding SubmitCommand}"
+                                                        Visibility="{Binding HasInputs, Converter={StaticResource BoolToVisibility}}"
+                                                        Style="{StaticResource ActionButton}" Background="{StaticResource AccentCyan}"
+                                                        Foreground="#16162A" Height="28" Margin="0,2,6,2"/>
+                                                <ItemsControl ItemsSource="{Binding Buttons}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <WrapPanel/>
+                                                        </ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Button Content="{Binding Label}" Command="{Binding Command}" ToolTip="{Binding ToolTip}"
+                                                                    Style="{StaticResource SecondaryButton}" Height="28" Margin="0,2,6,2"/>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </WrapPanel>
                                         </StackPanel>
                                     </Border>
                                 </DataTemplate>
