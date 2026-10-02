@@ -172,7 +172,7 @@ namespace VerisFlow.VenusAuto.Sample.ViewModels
         /// </summary>
         public void ExecuteCapture()
         {
-            NativeMethods.GetCursorPos(out NativeMethods.POINT screenPoint);
+            _ = NativeMethods.GetCursorPos(out NativeMethods.POINT screenPoint);
 
             IntPtr target = NativeMethods.WindowFromPoint(screenPoint);
             if (target == IntPtr.Zero) return;
@@ -181,7 +181,7 @@ namespace VerisFlow.VenusAuto.Sample.ViewModels
             for (var depth = 0; depth < 32; depth++)
             {
                 var clientPoint = screenPoint;
-                NativeMethods.ScreenToClient(target, ref clientPoint);
+                _ = NativeMethods.ScreenToClient(target, ref clientPoint);
 
                 var child = NativeMethods.ChildWindowFromPointEx(target, clientPoint, NativeMethods.CWP_SKIPINVISIBLE | NativeMethods.CWP_SKIPTRANSPARENT);
                 if (child == IntPtr.Zero || child == target) break;
@@ -198,9 +198,9 @@ namespace VerisFlow.VenusAuto.Sample.ViewModels
             if (root == IntPtr.Zero) root = target;
 
             var relativePoint = screenPoint;
-            NativeMethods.ScreenToClient(root, ref relativePoint);
+            _ = NativeMethods.ScreenToClient(root, ref relativePoint);
 
-            NativeMethods.GetWindowThreadProcessId(target, out var processId);
+            _ = NativeMethods.GetWindowThreadProcessId(target, out var processId);
 
             IntPtr hdc = NativeMethods.GetDC(IntPtr.Zero);
             uint pixel = NativeMethods.GetPixel(hdc, screenPoint.X, screenPoint.Y);
@@ -240,8 +240,8 @@ namespace VerisFlow.VenusAuto.Sample.ViewModels
             var capture = CurrentCapture!;
             var lParam = (IntPtr)((capture.RelativeY << 16) | (capture.RelativeX & 0xFFFF));
 
-            NativeMethods.PostMessage(capture.Hwnd, NativeMethods.WM_LBUTTONDOWN, (IntPtr)NativeMethods.MK_LBUTTON, lParam);
-            NativeMethods.PostMessage(capture.Hwnd, NativeMethods.WM_LBUTTONUP, IntPtr.Zero, lParam);
+            _ = NativeMethods.PostMessage(capture.Hwnd, NativeMethods.WM_LBUTTONDOWN, (IntPtr)NativeMethods.MK_LBUTTON, lParam);
+            _ = NativeMethods.PostMessage(capture.Hwnd, NativeMethods.WM_LBUTTONUP, IntPtr.Zero, lParam);
             Log($"Posted a click to {capture.HwndText} at {capture.RelativeText}.");
         }
 
@@ -252,8 +252,8 @@ namespace VerisFlow.VenusAuto.Sample.ViewModels
             if (TestInputText.Trim().Equals("{F5}", StringComparison.OrdinalIgnoreCase))
             {
                 var hwnd = CurrentCapture!.Hwnd;
-                NativeMethods.PostMessage(hwnd, NativeMethods.WM_KEYDOWN, (IntPtr)NativeMethods.VK_F5, IntPtr.Zero);
-                NativeMethods.PostMessage(hwnd, NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_F5, IntPtr.Zero);
+                _ = NativeMethods.PostMessage(hwnd, NativeMethods.WM_KEYDOWN, (IntPtr)NativeMethods.VK_F5, IntPtr.Zero);
+                _ = NativeMethods.PostMessage(hwnd, NativeMethods.WM_KEYUP, (IntPtr)NativeMethods.VK_F5, IntPtr.Zero);
                 Log($"Posted F5 to {CurrentCapture.HwndText}.");
             }
             else
@@ -322,6 +322,17 @@ namespace VerisFlow.VenusAuto.Sample.ViewModels
             => RunAsync($"Respond '{button.Text}' [{button.Id}] to '{dialog.Title}'", async service =>
             {
                 var response = await service.RespondToDialogAsync(dialog.Handle, button.Id, dialog.Fingerprint);
+                Log($"Dialog closed: {response.DialogClosed}. Dialogs open now: {response.OpenDialogs.Count}.");
+                ShowDialogs(response.OpenDialogs);
+            });
+
+        /// <summary>
+        /// Submits modified form input values and triggers the default confirmation button.
+        /// </summary>
+        public Task SubmitAsync(VenusDialogInfo dialog, VenusDialogSubmission submission)
+            => RunAsync($"Submit form values to '{dialog.Title}'", async service =>
+            {
+                var response = await service.SubmitDialogAsync(dialog.Handle, submission, dialog.Fingerprint);
                 Log($"Dialog closed: {response.DialogClosed}. Dialogs open now: {response.OpenDialogs.Count}.");
                 ShowDialogs(response.OpenDialogs);
             });
@@ -417,7 +428,7 @@ namespace VerisFlow.VenusAuto.Sample.ViewModels
             _lastDialogCount = dialogs.Count;
 
             var key = string.Join(";", dialogs.Select(d =>
-                $"{d.Fingerprint}|{d.Message}|{string.Join(",", d.Buttons.Select(b => b.Enabled ? "1" : "0"))}|{string.Join(",", d.Options.Select(o => o.Checked ? "1" : "0"))}"));
+                $"{d.Fingerprint}|{d.Message}|{string.Join(",", d.Buttons.Select(b => b.Enabled ? "1" : "0"))}|{string.Join(",", d.Options.Select(o => o.Checked ? "1" : "0"))}|{string.Join(",", d.Inputs.Select(i => $"{i.Key}:{i.Value}"))}"));
 
             if (key == _dialogKey) return;
             _dialogKey = key;

@@ -19,7 +19,7 @@ namespace VerisFlow.VenusAuto.Core.Internal;
 /// </summary>
 internal interface IDialogGuard
 {
-    /// <summary>Visible dialogs (#32770) of the process, topmost first.</summary>
+    /// <summary>Visible dialogs of the process, topmost first.</summary>
     IReadOnlyList<VenusDialogInfo> GetDialogs(int processId, IntPtr mainWindow);
 
     /// <summary>The dialog, or null when it is gone, not visible, not a dialog, or not owned by the process.</summary>
@@ -35,6 +35,12 @@ internal interface IDialogGuard
 
     /// <summary>Waits until the dialog is closed or hidden; false on timeout.</summary>
     Task<bool> WaitForCloseAsync(IntPtr dialog, TimeSpan timeout, CancellationToken cancellationToken = default);
+
+    /// <summary>Clicks a button on a custom UIA dialog.</summary>
+    bool ClickCustomButton(IntPtr dialog, int buttonId);
+
+    /// <summary>Submits values and triggers a button on a dialog.</summary>
+    bool SubmitDialog(IntPtr dialog, VenusDialogSubmission submission);
 }
 
 /// <inheritdoc />
@@ -59,11 +65,13 @@ internal sealed class DialogGuard : IDialogGuard
     private const int BsDefCommandLink = 0xF;
 
     private readonly IWindowMessenger _messenger;
+    private readonly IUiaDialogDriver _uiaDriver;
     private readonly RunControlIdentifiers _ids;
 
-    public DialogGuard(IWindowMessenger messenger, IOptions<VenusAutoOptions> options)
+    public DialogGuard(IWindowMessenger messenger, IUiaDialogDriver uiaDriver, IOptions<VenusAutoOptions> options)
     {
         _messenger = messenger;
+        _uiaDriver = uiaDriver;
         _ids = options.Value.RunControlIds;
     }
 
@@ -73,9 +81,27 @@ internal sealed class DialogGuard : IDialogGuard
 
         foreach (var hwnd in _messenger.GetTopLevelWindows(processId))
         {
-            if (IsVisibleDialog(hwnd))
+            if (!_messenger.IsWindow(hwnd) || !_messenger.IsWindowVisible(hwnd))
             {
-                dialogs.Add(Capture(hwnd, mainWindow));
+                continue;
+            }
+
+            if (hwnd == mainWindow)
+            {
+                continue;
+            }
+
+            if (IsNativeDialog(hwnd))
+            {
+                dialogs.Add(CaptureNative(hwnd, mainWindow));
+            }
+            else if (_uiaDriver.IsCustomDialog(hwnd, processId, mainWindow))
+            {
+                var custom = _uiaDriver.CaptureCustomDialog(hwnd, mainWindow, processId);
+                if (custom != null)
+                {
+                    dialogs.Add(custom);
+                }
             }
         }
 
@@ -83,9 +109,24 @@ internal sealed class DialogGuard : IDialogGuard
     }
 
     public VenusDialogInfo? Inspect(IntPtr dialog, int processId, IntPtr mainWindow)
-        => _messenger.IsWindow(dialog) && _messenger.GetProcessId(dialog) == processId && IsVisibleDialog(dialog)
-            ? Capture(dialog, mainWindow)
-            : null;
+    {
+        if (!_messenger.IsWindow(dialog) || _messenger.GetProcessId(dialog) != processId || !_messenger.IsWindowVisible(dialog))
+        {
+            return null;
+        }
+
+        if (dialog == mainWindow)
+        {
+            return null;
+        }
+
+        if (IsNativeDialog(dialog))
+        {
+            return CaptureNative(dialog, mainWindow);
+        }
+
+        return _uiaDriver.CaptureCustomDialog(dialog, mainWindow, processId);
+    }
 
     public async Task<VenusDialogInfo?> WaitForDialogAsync(
         int processId,
@@ -130,17 +171,65 @@ internal sealed class DialogGuard : IDialogGuard
         return true;
     }
 
-    private bool IsVisibleDialog(IntPtr hwnd)
+    public bool ClickCustomButton(IntPtr dialog, int buttonId)
+    {
+        if (IsNativeDialog(dialog))
+        {
+            return _messenger.ClickButton(dialog, buttonId);
+        }
+
+        return _uiaDriver.ClickButton(dialog, buttonId);
+    }
+
+    public bool SubmitDialog(IntPtr dialog, VenusDialogSubmission submission)
+    {
+        if (submission == null) return false;
+
+        if (IsNativeDialog(dialog))
+        {
+            if (submission.Inputs != null && submission.Inputs.Count > 0)
+            {
+                var edits = _messenger.GetDescendants(dialog)
+                    .Where(c => string.Equals(_messenger.GetClassName(c), EditClass, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var edit in edits)
+                {
+                    var id = _messenger.GetControlId(edit).ToString(CultureInfo.InvariantCulture);
+                    if (submission.Inputs.TryGetValue(id, out var val))
+                    {
+                        _messenger.SetText(edit, val);
+                    }
+                    else if (submission.Inputs.TryGetValue("0", out val) || submission.Inputs.TryGetValue("Edit_0", out val))
+                    {
+                        _messenger.SetText(edit, val);
+                    }
+                }
+            }
+
+            if (submission.ButtonId.HasValue)
+            {
+                return _messenger.ClickButton(dialog, submission.ButtonId.Value);
+            }
+
+            return true;
+        }
+
+        return _uiaDriver.Submit(dialog, submission);
+    }
+
+    private bool IsNativeDialog(IntPtr hwnd)
         => _messenger.IsWindowVisible(hwnd)
            && string.Equals(_messenger.GetClassName(hwnd), NativeMethods.DialogClassName, StringComparison.Ordinal);
 
-    private VenusDialogInfo Capture(IntPtr dialog, IntPtr mainWindow)
+    private VenusDialogInfo CaptureNative(IntPtr dialog, IntPtr mainWindow)
     {
         var title = _messenger.GetText(dialog).Trim();
         var owner = _messenger.GetOwner(dialog);
         var messageLines = new List<string>();
         var buttons = new List<VenusDialogButton>();
         var options = new List<VenusDialogOption>();
+        var inputs = new List<VenusDialogInput>();
 
         foreach (var child in _messenger.GetDescendants(dialog))
         {
@@ -158,10 +247,16 @@ internal sealed class DialogGuard : IDialogGuard
             }
             else if (string.Equals(className, EditClass, StringComparison.OrdinalIgnoreCase))
             {
-                // Read-only edits show text; editable ones are inputs (not handled yet).
+                // Read-only edits show text; editable ones are inputs.
                 if ((style & NativeMethods.ES_READONLY) != 0)
                 {
                     AddLine(messageLines, _messenger.GetText(child));
+                }
+                else
+                {
+                    var id = _messenger.GetControlId(child);
+                    var text = _messenger.GetText(child);
+                    inputs.Add(new VenusDialogInput(id.ToString(CultureInfo.InvariantCulture), string.Empty, text, false));
                 }
             }
             else if (string.Equals(className, ButtonClass, StringComparison.OrdinalIgnoreCase))
@@ -206,7 +301,11 @@ internal sealed class DialogGuard : IDialogGuard
             buttons,
             options,
             blocksMainWindow,
-            ComputeFingerprint(dialog, title, buttons.Select(b => b.Id).Concat(options.Select(o => o.Id))));
+            ComputeFingerprint(dialog, title, buttons.Select(b => b.Id).Concat(options.Select(o => o.Id))))
+        {
+            Inputs = inputs,
+            IsCustom = false
+        };
     }
 
     /// <summary>

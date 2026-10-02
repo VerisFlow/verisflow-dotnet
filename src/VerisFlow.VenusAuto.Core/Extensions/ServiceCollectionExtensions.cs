@@ -28,6 +28,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IWindowMessenger, WindowMessenger>();
         services.AddTransient<IWindowOrchestrator, WindowOrchestrator>();
         services.AddTransient<ISilentSimulator, SilentSimulator>();
+        services.AddTransient<IUiaDialogDriver, UiaDialogDriver>();
         services.AddTransient<IDialogGuard, DialogGuard>();
         services.AddScoped<IVenusRunControlService, VenusRunControlService>();
 

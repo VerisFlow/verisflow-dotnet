@@ -271,7 +271,21 @@ internal sealed partial class VenusRunControlService : IVenusRunControlService
 
         Log.RespondingToDialog(_logger, dialog.Title, button.Text);
 
-        if (!_messenger.ClickButton(hwnd, buttonId))
+        bool clicked = false;
+        if (dialog.IsCustom)
+        {
+            clicked = _dialogGuard.ClickCustomButton(hwnd, buttonId);
+        }
+        else
+        {
+            clicked = _messenger.ClickButton(hwnd, buttonId);
+            if (!clicked)
+            {
+                clicked = _dialogGuard.ClickCustomButton(hwnd, buttonId);
+            }
+        }
+
+        if (!clicked)
         {
             throw new InvalidOperationException($"Pressing '{button.Text}' failed.");
         }
@@ -279,6 +293,47 @@ internal sealed partial class VenusRunControlService : IVenusRunControlService
         var closed = await _dialogGuard.WaitForCloseAsync(hwnd, DialogCloseTimeout, cancellationToken).ConfigureAwait(false);
 
         // Give a follow-up dialog (opened by the button) a moment to appear.
+        await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+
+        return new VenusDialogResponse(closed, _dialogGuard.GetDialogs(processId, mainWindow));
+    }
+
+    /// <inheritdoc />
+    public async Task<VenusDialogResponse> SubmitDialogAsync(long dialogHandle, VenusDialogSubmission submission, string fingerprint, CancellationToken cancellationToken = default)
+    {
+#if NET6_0_OR_GREATER
+        ArgumentNullException.ThrowIfNull(submission);
+#else
+        if (submission is null)
+        {
+            throw new ArgumentNullException(nameof(submission));
+        }
+#endif
+
+        var processId = FindProcessId()
+            ?? throw new InvalidOperationException($"Run Control ('{_options.RunControlProcessName}') is not running.");
+
+        var mainWindow = await _orchestrator.FindInteractiveWindowAsync(_options.RunControlProcessName, cancellationToken).ConfigureAwait(false);
+        var hwnd = new IntPtr(dialogHandle);
+
+        var dialog = _dialogGuard.Inspect(hwnd, processId, mainWindow)
+            ?? throw new InvalidOperationException("The dialog is no longer open. Read the dialogs again.");
+
+        if (!string.Equals(dialog.Fingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The dialog changed since it was read. Read the dialogs again before responding.");
+        }
+
+        Log.SubmittingDialog(_logger, dialog.Title);
+
+        bool success = _dialogGuard.SubmitDialog(hwnd, submission);
+        if (!success)
+        {
+            throw new InvalidOperationException($"Submitting form values to dialog '{dialog.Title}' failed.");
+        }
+
+        var closed = await _dialogGuard.WaitForCloseAsync(hwnd, DialogCloseTimeout, cancellationToken).ConfigureAwait(false);
+
         await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
 
         return new VenusDialogResponse(closed, _dialogGuard.GetDialogs(processId, mainWindow));
@@ -858,5 +913,8 @@ internal sealed partial class VenusRunControlService : IVenusRunControlService
 
         [LoggerMessage(EventId = 22, Level = LogLevel.Debug, Message = "No command ID configured for {Command}; using input simulation.")]
         public static partial void UsingInputFallback(ILogger logger, string command);
+
+        [LoggerMessage(EventId = 23, Level = LogLevel.Information, Message = "Submitting values to dialog '{Title}'.")]
+        public static partial void SubmittingDialog(ILogger logger, string title);
     }
 }
