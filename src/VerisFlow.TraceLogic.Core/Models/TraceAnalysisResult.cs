@@ -1,4 +1,4 @@
-﻿namespace TraceLogic.Core.Models
+namespace TraceLogic.Core.Models
 {
     /// <summary>
     /// A container for all the data parsed from a .trc file.
@@ -30,6 +30,12 @@
         /// </summary>
         /// <value>A list of complete transfer events mapped across channels.</value>
         public List<LiquidTransferEvent> LiquidTransfers { get; set; } = new List<LiquidTransferEvent>();
+
+        /// <summary>
+        /// Gets or sets the collection of errors and diagnostic issues parsed from the trace log.
+        /// </summary>
+        /// <value>A list of trace error information objects.</value>
+        public List<TraceErrorInfo> TraceErrors { get; set; } = new List<TraceErrorInfo>();
 
         /// <summary>
         /// Gets or sets any structural anomalies or critical failures encountered during the parsing execution.

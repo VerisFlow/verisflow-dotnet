@@ -1,4 +1,4 @@
-﻿namespace TraceLogic.Core.Enums
+namespace TraceLogic.Core.Enums
 {
     /// <summary>
     /// Represents the status of a trace log entry.
@@ -28,6 +28,16 @@
         /// <summary>
         /// Indicates that data or a log entry was successfully flushed to the file.
         /// </summary>
-        Written
+        Written,
+
+        /// <summary>
+        /// Indicates an execution failure or error state during a command.
+        /// </summary>
+        Error,
+
+        /// <summary>
+        /// Indicates a command finished execution but encountered errors.
+        /// </summary>
+        CompleteWithError
     }
 }
