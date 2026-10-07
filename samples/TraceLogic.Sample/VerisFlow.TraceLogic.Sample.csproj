@@ -15,7 +15,10 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging" />
-    <PackageReference Include="VerisFlow.TraceLogic.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\VerisFlow.TraceLogic.Core\VerisFlow.TraceLogic.Core.csproj" />
   </ItemGroup>
 
 </Project>

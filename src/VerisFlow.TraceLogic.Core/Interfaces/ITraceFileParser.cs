@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Threading;
 using TraceLogic.Core.Models;
 
@@ -28,5 +28,10 @@ namespace TraceLogic.Core.Interfaces
         /// Asynchronously processes pipetting steps to generate a chronological stream of liquid transfers.
         /// </summary>
         IAsyncEnumerable<LiquidTransferEvent> CreateLiquidTransferEventsAsync(IAsyncEnumerable<PipettingStep> stepsStream, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Asynchronously extracts trace errors and failure events from the entry stream.
+        /// </summary>
+        IAsyncEnumerable<TraceErrorInfo> ExtractErrorsAsync(IAsyncEnumerable<TraceEntry> entriesStream, CancellationToken cancellationToken = default);
     }
 }

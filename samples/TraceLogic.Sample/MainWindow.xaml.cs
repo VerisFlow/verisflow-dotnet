@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using System;
@@ -115,7 +115,10 @@ namespace TraceLogic
 
             this.AnalysisResult = analysisResult;
 
-            StatusTextBlock.Text = $"Successfully parsed {AnalysisResult.LiquidTransfers.Count} liquid transfer events from {AnalysisResult.FileName}.";
+            string errorSummary = AnalysisResult.TraceErrors.Count > 0
+                ? $" ({AnalysisResult.TraceErrors.Count} error(s) detected)"
+                : string.Empty;
+            StatusTextBlock.Text = $"Successfully parsed {AnalysisResult.LiquidTransfers.Count} liquid transfer events{errorSummary} from {AnalysisResult.FileName}.";
             WelcomeMessage.Visibility = Visibility.Collapsed;
             DataTabs.Visibility = Visibility.Visible;
             DataTabs.SelectedIndex = 0; // Focus on the new tab

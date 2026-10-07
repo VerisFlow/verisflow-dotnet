@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -29,7 +29,7 @@ namespace TraceLogic.Core.Parsing
         private readonly ILogger<TraceFileParser> _logger;
 
 #if NET8_0_OR_GREATER
-        [GeneratedRegex(@"^(?<timestamp>[\d\- :]+)> (?<source>.+?) : (?<command>.+?) - (?<status>\w+); ?(?<details>.*)$")]
+        [GeneratedRegex(@"^(?<timestamp>[\d\- :]+)> (?<source>.+?) : (?<command>.+?) - (?<status>[^;]+); ?(?<details>.*)$")]
         private static partial Regex GetLineRegex();
 
         [GeneratedRegex(@"channel (?<channel>\d+): (?<labware>[^,]+), (?<position>[^,]+), (?<volume>[\d\.]+) uL")]
@@ -37,9 +37,18 @@ namespace TraceLogic.Core.Parsing
 
         [GeneratedRegex(@"channel (?<channel>\d+): (?<labware>[^,]+), (?<position>[^,>]+)")]
         private static partial Regex GetTipActionDetailsRegex();
+
+        [GeneratedRegex(@"^(?<location>.+?\.(?:sub|hsl|res|med|tml)\(\d+\))\s*:\s*(?:error\s+(?<code>\w+):?\s*)?(?<desc>.*)$", RegexOptions.IgnoreCase)]
+        private static partial Regex GetFileErrorRegex();
+
+        [GeneratedRegex(@"(?:\berror\s+(?<code>\d+|0x[0-9a-fA-FxX]+)|\berror description is:.*?\((?<code>0x[0-9a-fA-FxX\s\-]+)\)|\((?<code>0x[0-9a-fA-FxX\s\-]+)\))", RegexOptions.IgnoreCase)]
+        private static partial Regex GetErrorCodeRegex();
+
+        [GeneratedRegex(@"\b(?:error\s+\d+|error\s*:|error description is|an error occurred|syntax error)\b", RegexOptions.IgnoreCase)]
+        private static partial Regex GetExplicitErrorRegex();
 #else
         private static readonly Regex LineRegexCompiled = new Regex(
-            @"^(?<timestamp>[\d\- :]+)> (?<source>.+?) : (?<command>.+?) - (?<status>\w+); ?(?<details>.*)$",
+            @"^(?<timestamp>[\d\- :]+)> (?<source>.+?) : (?<command>.+?) - (?<status>[^;]+); ?(?<details>.*)$",
             RegexOptions.Compiled);
         private static Regex GetLineRegex() => LineRegexCompiled;
 
@@ -52,6 +61,21 @@ namespace TraceLogic.Core.Parsing
             @"channel (?<channel>\d+): (?<labware>[^,]+), (?<position>[^,>]+)",
             RegexOptions.Compiled);
         private static Regex GetTipActionDetailsRegex() => TipActionDetailsRegexCompiled;
+
+        private static readonly Regex FileErrorRegexCompiled = new Regex(
+            @"^(?<location>.+?\.(?:sub|hsl|res|med|tml)\(\d+\))\s*:\s*(?:error\s+(?<code>\w+):?\s*)?(?<desc>.*)$",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static Regex GetFileErrorRegex() => FileErrorRegexCompiled;
+
+        private static readonly Regex ErrorCodeRegexCompiled = new Regex(
+            @"(?:\berror\s+(?<code>\d+|0x[0-9a-fA-FxX]+)|\berror description is:.*?\((?<code>0x[0-9a-fA-FxX\s\-]+)\)|\((?<code>0x[0-9a-fA-FxX\s\-]+)\))",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static Regex GetErrorCodeRegex() => ErrorCodeRegexCompiled;
+
+        private static readonly Regex ExplicitErrorRegexCompiled = new Regex(
+            @"\b(?:error\s+(?<code>\d+|:)|error description is|an error occurred|syntax error)\b",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static Regex GetExplicitErrorRegex() => ExplicitErrorRegexCompiled;
 #endif
 
         /// <summary>
@@ -102,6 +126,13 @@ namespace TraceLogic.Core.Parsing
                         transfers.Add(transfer);
                     }
                     result.LiquidTransfers = transfers;
+
+                    var errors = new List<TraceErrorInfo>();
+                    await foreach (var error in ExtractErrorsAsync(GetAsyncEnumerable(entries)))
+                    {
+                        errors.Add(error);
+                    }
+                    result.TraceErrors = errors;
 
                 }).GetAwaiter().GetResult();
             }
@@ -158,7 +189,7 @@ namespace TraceLogic.Core.Parsing
 #endif
                         Source = match.Groups["source"].Value.Trim(),
                         Command = match.Groups["command"].Value.Trim(),
-                        Status = Enum.TryParse<EntryStatus>(match.Groups["status"].Value, true, out var status) ? status : EntryStatus.Unknown,
+                        Status = ParseEntryStatus(match.Groups["status"].Value),
                         Details = match.Groups["details"].Value.Trim(),
                         RawLine = line
                     };
@@ -267,6 +298,103 @@ namespace TraceLogic.Core.Parsing
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Extracts trace errors and failure events from the entry stream.
+        /// </summary>
+        public async IAsyncEnumerable<TraceErrorInfo> ExtractErrorsAsync(IAsyncEnumerable<TraceEntry> entriesStream, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await foreach (var currentEntry in entriesStream.WithCancellation(cancellationToken))
+            {
+                if (IsErrorEntry(currentEntry))
+                {
+                    yield return CreateTraceErrorInfo(currentEntry);
+                }
+            }
+        }
+
+        private static bool IsErrorEntry(TraceEntry entry)
+        {
+            if (entry.Status == EntryStatus.Error || entry.Status == EntryStatus.CompleteWithError)
+            {
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.Details))
+            {
+                return false;
+            }
+
+            return GetFileErrorRegex().IsMatch(entry.Details) || GetExplicitErrorRegex().IsMatch(entry.Details);
+        }
+
+        private static TraceErrorInfo CreateTraceErrorInfo(TraceEntry entry)
+        {
+            string? errorCode = null;
+            string? fileLocation = null;
+            string message = entry.Details;
+
+            if (!string.IsNullOrWhiteSpace(entry.Details))
+            {
+                var fileMatch = GetFileErrorRegex().Match(entry.Details);
+                if (fileMatch.Success)
+                {
+                    fileLocation = fileMatch.Groups["location"].Value.Trim();
+                    if (fileMatch.Groups["code"].Success)
+                    {
+                        errorCode = fileMatch.Groups["code"].Value.Trim();
+                    }
+
+                    var desc = fileMatch.Groups["desc"].Value.Trim();
+                    message = !string.IsNullOrEmpty(desc) ? desc : entry.Details;
+                }
+                else
+                {
+                    var codeMatch = GetErrorCodeRegex().Match(entry.Details);
+                    if (codeMatch.Success && codeMatch.Groups["code"].Success)
+                    {
+                        errorCode = codeMatch.Groups["code"].Value.Trim();
+                    }
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                message = entry.Status switch
+                {
+                    EntryStatus.CompleteWithError => "Command completed with error.",
+                    EntryStatus.Error => "Command failed with error.",
+                    _ => $"{entry.Command} reported an error."
+                };
+            }
+
+            return new TraceErrorInfo
+            {
+                LineNumber = entry.LineNumber,
+                Timestamp = entry.Timestamp,
+                Source = entry.Source,
+                Command = entry.Command,
+                Message = message,
+                ErrorCode = errorCode,
+                FileLocation = fileLocation
+            };
+        }
+
+        private static EntryStatus ParseEntryStatus(string statusRaw)
+        {
+            string normalized = statusRaw.Trim().Replace(" ", string.Empty);
+            if (Enum.TryParse<EntryStatus>(normalized, true, out var status))
+            {
+                return status;
+            }
+
+            if (normalized.Equals("CompleteWithErrors", StringComparison.OrdinalIgnoreCase))
+            {
+                return EntryStatus.CompleteWithError;
+            }
+
+            return EntryStatus.Unknown;
         }
 
         /// <summary>

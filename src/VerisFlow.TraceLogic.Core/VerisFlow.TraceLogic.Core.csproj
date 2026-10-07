@@ -4,9 +4,12 @@
         <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
 
         <PackageId>VerisFlow.TraceLogic.Core</PackageId>
-        <Version>0.1.0</Version>
-        <Description>Parser, locator, and exporter for Hamilton Venus trace log (.trc) files.</Description>
-        <PackageTags>venus;trace;log;parser;pipetting;liquid-handling</PackageTags>
+        <Version>0.2.0</Version>
+        <Authors>VerisFlow</Authors>
+        <Company>VerisFlow</Company>
+        <Description>Parser, locator, diagnostic error extractor, and exporter for Hamilton Venus trace log (.trc) files.</Description>
+        <PackageTags>venus;trace;log;parser;pipetting;liquid-handling;error-diagnostics</PackageTags>
+        <PackageReleaseNotes>Added error parsing support, syntax error detection, and TraceErrorInfo model extraction from Hamilton Venus trace logs.</PackageReleaseNotes>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
         <PackageReadmeFile>README.md</PackageReadmeFile>
