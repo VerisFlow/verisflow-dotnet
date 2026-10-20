@@ -146,7 +146,7 @@ namespace VerisFlow.VenusDeckParser.Desktop
         /// <param name="sequences">The extracted sequence collections with nested matrices.</param>
         /// <param name="errors">Optional collection of layout parsing errors.</param>
         /// <returns>A formatted markdown document string.</returns>
-        private static string GenerateMarkdown(string deckLayoutFile, string instrument, List<ProcessedLabwareInfo> processedData, List<SequenceInfo> sequences, List<string>? errors = null)
+        private static string GenerateMarkdown(string deckLayoutFile, string instrument, List<ProcessedLabwareInfo> processedData, List<SequenceInfo> sequences, List<string> errors = null)
         {
             var sb = new StringBuilder();
             var labware = processedData ?? new List<ProcessedLabwareInfo>();
@@ -340,7 +340,7 @@ namespace VerisFlow.VenusDeckParser.Desktop
             }
         }
 
-        private static void AppendNotes(StringBuilder sb, List<ProcessedLabwareInfo> labware, List<string>? errors = null)
+        private static void AppendNotes(StringBuilder sb, List<ProcessedLabwareInfo> labware, List<string> errors = null)
         {
             sb.AppendLine("## Geometry Notes and Warnings");
             sb.AppendLine();
@@ -469,7 +469,7 @@ namespace VerisFlow.VenusDeckParser.Desktop
             return string.IsNullOrEmpty(value) ? string.Empty : value.Replace("|", "\\|");
         }
 
-        private static string Position(LabwarePosition? position)
+        private static string Position(LabwarePosition position)
         {
             return position == null
                 ? "—"
