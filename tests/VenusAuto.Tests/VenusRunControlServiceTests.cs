@@ -38,6 +38,7 @@ public class VenusRunControlServiceTests
 
         _messengerMock.Setup(x => x.PostCommand(It.IsAny<IntPtr>(), It.IsAny<int>())).Returns(true);
         _messengerMock.Setup(x => x.ClickButton(It.IsAny<IntPtr>(), It.IsAny<int>())).Returns(true);
+        _messengerMock.Setup(x => x.GetText(It.IsAny<IntPtr>())).Returns(string.Empty);
     }
 
     private static VenusAutoOptions DefaultOptions() => new()
@@ -46,7 +47,8 @@ public class VenusRunControlServiceTests
         RunControlUI = new AppCoordinates
         {
             StartButton = new RelativePoint { X = 100, Y = 200 },
-            AbortButton = new RelativePoint { X = 300, Y = 400 }
+            AbortButton = new RelativePoint { X = 300, Y = 400 },
+            PauseButton = new RelativePoint { X = 500, Y = 600 }
         }
     };
 
@@ -88,7 +90,7 @@ public class VenusRunControlServiceTests
             .Setup(x => x.FindInteractiveWindowAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(IntPtr.Zero);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().StartRunAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().StartRunAsync(TestContext.Current.CancellationToken));
 
         _messengerMock.Verify(x => x.PostCommand(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
         _simulatorMock.Verify(x => x.ClickRelativeAsync(It.IsAny<IntPtr>(), It.IsAny<int>(), It.IsAny<int>()), Times.Never);
@@ -100,7 +102,7 @@ public class VenusRunControlServiceTests
         MainWindowIsOpen();
         _messengerMock.Setup(x => x.IsCommandEnabled(MainWindow, 32795)).Returns(true);
 
-        await CreateService().StartRunAsync();
+        await CreateService().StartRunAsync(TestContext.Current.CancellationToken);
 
         _messengerMock.Verify(x => x.PostCommand(MainWindow, 32795), Times.Once);
         _simulatorMock.Verify(x => x.ClickRelativeAsync(It.IsAny<IntPtr>(), It.IsAny<int>(), It.IsAny<int>()), Times.Never);
@@ -112,7 +114,7 @@ public class VenusRunControlServiceTests
         MainWindowIsOpen();
         _messengerMock.Setup(x => x.IsCommandEnabled(MainWindow, 32795)).Returns(false);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().StartRunAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().StartRunAsync(TestContext.Current.CancellationToken));
 
         _messengerMock.Verify(x => x.PostCommand(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
     }
@@ -125,7 +127,7 @@ public class VenusRunControlServiceTests
             .Setup(x => x.GetDialogs(It.IsAny<int>(), MainWindow))
             .Returns(new[] { Dialog(777, VenusDialogKind.Unknown, "fp", 1) });
 
-        var exception = await Assert.ThrowsAsync<VenusDialogPendingException>(() => CreateService().StartRunAsync());
+        var exception = await Assert.ThrowsAsync<VenusDialogPendingException>(() => CreateService().StartRunAsync(TestContext.Current.CancellationToken));
 
         Assert.Single(exception.Dialogs);
         _messengerMock.Verify(x => x.PostCommand(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
@@ -138,9 +140,33 @@ public class VenusRunControlServiceTests
         var options = DefaultOptions();
         options.RunControlIds.StartCommand = 0;
 
-        await CreateService(options).StartRunAsync();
+        await CreateService(options).StartRunAsync(TestContext.Current.CancellationToken);
 
         _simulatorMock.Verify(x => x.ClickRelativeAsync(MainWindow, 100, 200), Times.Once);
+        _messengerMock.Verify(x => x.PostCommand(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PauseRunAsync_PostsPauseCommand_WhenRunning()
+    {
+        MainWindowIsOpen();
+        _messengerMock.Setup(x => x.IsCommandEnabled(MainWindow, 32796)).Returns(true);
+
+        await CreateService().PauseRunAsync(TestContext.Current.CancellationToken);
+
+        _messengerMock.Verify(x => x.PostCommand(MainWindow, 32796), Times.Once);
+        _simulatorMock.Verify(x => x.ClickRelativeAsync(It.IsAny<IntPtr>(), It.IsAny<int>(), It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PauseRunAsync_NoOps_WhenAlreadyPaused()
+    {
+        MainWindowIsOpen();
+        var paused = Dialog(555, VenusDialogKind.Paused, "fp", 217, 211);
+        _dialogGuardMock.Setup(x => x.GetDialogs(It.IsAny<int>(), MainWindow)).Returns(new[] { paused });
+
+        await CreateService().PauseRunAsync(TestContext.Current.CancellationToken);
+
         _messengerMock.Verify(x => x.PostCommand(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
     }
 
@@ -151,7 +177,7 @@ public class VenusRunControlServiceTests
         var paused = Dialog(555, VenusDialogKind.Paused, "fp", 217, 211);
         _dialogGuardMock.Setup(x => x.GetDialogs(It.IsAny<int>(), MainWindow)).Returns(new[] { paused });
 
-        await CreateService().ResumeRunAsync();
+        await CreateService().ResumeRunAsync(TestContext.Current.CancellationToken);
 
         _messengerMock.Verify(x => x.ClickButton((IntPtr)555, 217), Times.Once);
     }
@@ -161,7 +187,7 @@ public class VenusRunControlServiceTests
     {
         MainWindowIsOpen();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().ResumeRunAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().ResumeRunAsync(TestContext.Current.CancellationToken));
 
         _messengerMock.Verify(x => x.ClickButton(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
     }
@@ -176,7 +202,7 @@ public class VenusRunControlServiceTests
             .Setup(x => x.WaitForDialogAsync(It.IsAny<int>(), MainWindow, It.IsAny<Func<VenusDialogInfo, bool>>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(confirmation);
 
-        var result = await CreateService().AbortRunAsync(confirm: false);
+        var result = await CreateService().AbortRunAsync(confirm: false, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Aborted);
         Assert.Same(confirmation, result.PendingConfirmation);
@@ -194,7 +220,7 @@ public class VenusRunControlServiceTests
             .Setup(x => x.WaitForDialogAsync(It.IsAny<int>(), MainWindow, It.IsAny<Func<VenusDialogInfo, bool>>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(confirmation);
 
-        var result = await CreateService().AbortRunAsync(confirm: true);
+        var result = await CreateService().AbortRunAsync(confirm: true, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Aborted);
         _messengerMock.Verify(x => x.ClickButton((IntPtr)888, 220), Times.Once);
@@ -205,15 +231,79 @@ public class VenusRunControlServiceTests
     {
         MainWindowIsOpen();
         var paused = Dialog(555, VenusDialogKind.Paused, "fp", 217, 211);
-        _dialogGuardMock.Setup(x => x.GetDialogs(It.IsAny<int>(), MainWindow)).Returns(new[] { paused });
+
+        // Sequence: Initial call detects the paused dialog; subsequent call within GetStatusAsync reflects the dialog closed upon abort.
+        _dialogGuardMock
+            .SetupSequence(x => x.GetDialogs(It.IsAny<int>(), MainWindow))
+            .Returns(new[] { paused })
+            .Returns(Array.Empty<VenusDialogInfo>());
+
         _dialogGuardMock
             .Setup(x => x.WaitForDialogAsync(It.IsAny<int>(), MainWindow, It.IsAny<Func<VenusDialogInfo, bool>>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((VenusDialogInfo?)null);
 
-        await CreateService().AbortRunAsync();
+        var result = await CreateService().AbortRunAsync(cancellationToken: TestContext.Current.CancellationToken);
 
+        Assert.True(result.Aborted);
         _messengerMock.Verify(x => x.ClickButton((IntPtr)555, 211), Times.Once);
         _messengerMock.Verify(x => x.PostCommand(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AbortRunAsync_WhenBlockingDialogHasAbortButton_ClicksAbortButtonOnDialog()
+    {
+        MainWindowIsOpen();
+        var errorWithAbort = new VenusDialogInfo(
+            666,
+            MainWindow.ToInt64(),
+            VenusDialogKind.Unknown,
+            "Error",
+            "Hardware Error",
+            new List<VenusDialogButton> { new(101, "Abort", true, false) },
+            Array.Empty<VenusDialogOption>(),
+            true,
+            "fp");
+
+        _dialogGuardMock
+            .SetupSequence(x => x.GetDialogs(It.IsAny<int>(), MainWindow))
+            .Returns(new[] { errorWithAbort })
+            .Returns(Array.Empty<VenusDialogInfo>());
+
+        _dialogGuardMock
+            .Setup(x => x.WaitForDialogAsync(It.IsAny<int>(), MainWindow, It.IsAny<Func<VenusDialogInfo, bool>>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((VenusDialogInfo?)null);
+
+        var result = await CreateService().AbortRunAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Aborted);
+        _messengerMock.Verify(x => x.ClickButton((IntPtr)666, 101), Times.Once);
+        _messengerMock.Verify(x => x.PostCommand(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_ReturnsStatusAndLoadedMethod()
+    {
+        MainWindowIsOpen();
+        _messengerMock.Setup(x => x.GetText(MainWindow)).Returns("Hamilton Run Control - TestMethod.med");
+        _messengerMock.Setup(x => x.IsCommandEnabled(MainWindow, 32796)).Returns(true);
+
+        var status = await CreateService().GetStatusAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("TestMethod.med", status.LoadedMethodName);
+        Assert.Equal(RunState.Running, status.State);
+    }
+
+    [Fact]
+    public async Task GetDialogsAsync_ReturnsDialogsFromGuard()
+    {
+        MainWindowIsOpen();
+        var dialog = Dialog(111, VenusDialogKind.Unknown, "fp", 1);
+        _dialogGuardMock.Setup(x => x.GetDialogs(It.IsAny<int>(), MainWindow)).Returns(new[] { dialog });
+
+        var dialogs = await CreateService().GetDialogsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Single(dialogs);
+        Assert.Equal(111, dialogs[0].Handle);
     }
 
     [Fact]
@@ -224,7 +314,7 @@ public class VenusRunControlServiceTests
             .Setup(x => x.Inspect(It.IsAny<IntPtr>(), It.IsAny<int>(), It.IsAny<IntPtr>()))
             .Returns(Dialog(999, VenusDialogKind.Unknown, "current", 1, 2));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().RespondToDialogAsync(999, 1, "stale"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().RespondToDialogAsync(999, 1, "stale", cancellationToken: TestContext.Current.CancellationToken));
 
         _messengerMock.Verify(x => x.ClickButton(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
     }
@@ -237,7 +327,7 @@ public class VenusRunControlServiceTests
             .Setup(x => x.Inspect(It.IsAny<IntPtr>(), It.IsAny<int>(), It.IsAny<IntPtr>()))
             .Returns(Dialog(999, VenusDialogKind.Unknown, "current", 1, 2));
 
-        var response = await CreateService().RespondToDialogAsync(999, 2, "current");
+        var response = await CreateService().RespondToDialogAsync(999, 2, "current", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(response.DialogClosed);
         _messengerMock.Verify(x => x.ClickButton((IntPtr)999, 2), Times.Once);
