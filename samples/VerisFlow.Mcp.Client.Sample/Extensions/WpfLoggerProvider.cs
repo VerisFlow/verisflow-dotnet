@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using System;
 
 namespace VerisFlow.Mcp.Client.Sample;
@@ -43,7 +43,7 @@ public class WpfLoggerProvider : ILoggerProvider
     /// <summary>
     /// Custom <see cref="ILogger"/> implementation that delegates log message processing to the WPF log action.
     /// </summary>
-    private class WpfLogger : ILogger
+    private sealed class WpfLogger : ILogger
     {
         /// <summary>
         /// The action delegate used to deliver formatted log strings.
