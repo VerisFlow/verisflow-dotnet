@@ -81,9 +81,16 @@ internal sealed partial class VenusRunControlService : IVenusRunControlService
         Log.PausingRun(_logger);
 
         var (processId, mainWindow) = await RequireRunControlAsync(cancellationToken).ConfigureAwait(false);
-        EnsureNoBlockingDialog(processId, mainWindow, "a pause command");
-        EnsureCommandAvailable(mainWindow, _ids.PauseCommand, "Pause", "no run is in progress");
+        var dialogs = _dialogGuard.GetDialogs(processId, mainWindow);
 
+        // If Run Control is already paused, physical motion is already halted.
+        if (dialogs.Any(d => d.Kind == VenusDialogKind.Paused))
+        {
+            Log.RunControlAlreadyPaused(_logger);
+            return;
+        }
+
+        EnsureCommandAvailable(mainWindow, _ids.PauseCommand, "Pause", "no run is in progress");
         await ExecuteCommandAsync(mainWindow, _ids.PauseCommand, _options.RunControlUI.PauseButton, "Pause").ConfigureAwait(false);
     }
 
@@ -122,39 +129,72 @@ internal sealed partial class VenusRunControlService : IVenusRunControlService
 
         if (confirmation is null)
         {
-            // Another dialog waits for a person (e.g. an error): the abort would not reach Run Control.
-            var other = dialogs.Where(d => d.BlocksMainWindow && d.Kind != VenusDialogKind.Paused).ToList();
-            if (other.Count > 0)
-            {
-                throw new VenusDialogPendingException(
-                    $"Run Control is waiting for a response to '{Describe(other[0])}'. Respond to it before aborting.", other);
-            }
+            var knownHandles = new HashSet<long>(dialogs.Select(d => d.Handle));
 
             var paused = dialogs.FirstOrDefault(d => d.Kind == VenusDialogKind.Paused);
             if (paused is not null)
             {
-                if (!_messenger.ClickButton(new IntPtr(paused.Handle), _ids.PausedAbortButton))
+                // Trigger abort from the pause dialog
+                bool clicked = _messenger.ClickButton(new IntPtr(paused.Handle), _ids.PausedAbortButton);
+                if (!clicked)
+                {
+                    var abortBtn = paused.Buttons.FirstOrDefault(b => b.Enabled && string.Equals(b.Text, "Abort", StringComparison.OrdinalIgnoreCase));
+                    if (abortBtn != null)
+                    {
+                        clicked = _messenger.ClickButton(new IntPtr(paused.Handle), abortBtn.Id);
+                    }
+                }
+
+                if (!clicked)
                 {
                     throw new InvalidOperationException("The Abort button of the pause dialog is not available.");
                 }
             }
             else
             {
-                EnsureCommandAvailable(mainWindow, _ids.AbortCommand, "Abort", "no run is in progress");
-                await ExecuteCommandAsync(mainWindow, _ids.AbortCommand, _options.RunControlUI.AbortButton, "Abort").ConfigureAwait(false);
+                // Check whether any existing blocking dialog provides an explicit Abort action (e.g. an error dialog)
+                var dialogWithAbort = dialogs.FirstOrDefault(d =>
+                    d.BlocksMainWindow &&
+                    d.Buttons.Any(b => b.Enabled && string.Equals(b.Text, "Abort", StringComparison.OrdinalIgnoreCase)));
+
+                if (dialogWithAbort is not null)
+                {
+                    var abortBtn = dialogWithAbort.Buttons.First(b => b.Enabled && string.Equals(b.Text, "Abort", StringComparison.OrdinalIgnoreCase));
+                    _messenger.ClickButton(new IntPtr(dialogWithAbort.Handle), abortBtn.Id);
+                }
+                else
+                {
+                    // No modal dialog blocking abort: trigger abort through the main window command
+                    EnsureCommandAvailable(mainWindow, _ids.AbortCommand, "Abort", "no run is in progress");
+                    await ExecuteCommandAsync(mainWindow, _ids.AbortCommand, _options.RunControlUI.AbortButton, "Abort").ConfigureAwait(false);
+                }
             }
 
+            // Await the abort confirmation dialog opened by the abort action
             confirmation = await _dialogGuard.WaitForDialogAsync(
-                processId, mainWindow, d => d.Kind == VenusDialogKind.AbortConfirmation, DialogAppearTimeout, cancellationToken).ConfigureAwait(false);
+                processId,
+                mainWindow,
+                d => d.Kind == VenusDialogKind.AbortConfirmation || (!knownHandles.Contains(d.Handle) && d.Title.Contains("Abort", StringComparison.OrdinalIgnoreCase)),
+                DialogAppearTimeout,
+                cancellationToken).ConfigureAwait(false);
 
             if (confirmation is null)
             {
                 Log.AbortConfirmationMissing(_logger);
+
+                // Verify if the run already stopped without requiring a separate confirmation dialog
+                var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+                if (status.State is RunState.Idle or RunState.Error or RunState.Unknown)
+                {
+                    return new VenusAbortResult(true, null, "The run was aborted.");
+                }
+
                 return new VenusAbortResult(false, null,
                     "Run Control did not ask for confirmation. Check the status to see whether the run stopped.");
             }
         }
 
+        // Step 1: Return the unconfirmed abort dialog for user approval
         if (!confirm)
         {
             Log.AbortConfirmationPending(_logger);
@@ -162,8 +202,24 @@ internal sealed partial class VenusRunControlService : IVenusRunControlService
                 "Run Control asks for confirmation. The run continues until the abort is confirmed.");
         }
 
+        // Step 2: Confirm the abort dialog
         var dialog = new IntPtr(confirmation.Handle);
-        if (!_messenger.ClickButton(dialog, _ids.AbortConfirmButton))
+        bool confirmed = _ids.AbortConfirmButton > 0 && _messenger.ClickButton(dialog, _ids.AbortConfirmButton);
+
+        if (!confirmed)
+        {
+            var confirmBtn = confirmation.Buttons.FirstOrDefault(b =>
+                b.Enabled && (string.Equals(b.Text, "Yes", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(b.Text, "OK", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(b.Text, "Abort", StringComparison.OrdinalIgnoreCase)));
+
+            if (confirmBtn != null)
+            {
+                confirmed = _messenger.ClickButton(dialog, confirmBtn.Id);
+            }
+        }
+
+        if (!confirmed)
         {
             throw new InvalidOperationException("The confirm button of the abort confirmation is not available.");
         }
@@ -916,5 +972,11 @@ internal sealed partial class VenusRunControlService : IVenusRunControlService
 
         [LoggerMessage(EventId = 23, Level = LogLevel.Information, Message = "Submitting values to dialog '{Title}'.")]
         public static partial void SubmittingDialog(ILogger logger, string title);
+
+        [LoggerMessage(EventId = 24, Level = LogLevel.Information, Message = "Run Control is already paused.")]
+        public static partial void RunControlAlreadyPaused(ILogger logger);
+
+        [LoggerMessage(EventId = 25, Level = LogLevel.Information, Message = "Run Control is already halted by an open dialog ({dialogTitle}).")]
+        public static partial void RunControlAlreadyHaltedByDialog(ILogger logger, string dialogTitle);
     }
 }
