@@ -40,7 +40,7 @@ jobs:
         dotnet build tests/VenusAuto.Tests/VenusAuto.Core.Tests.csproj --no-restore -c Release
 
     - name: Run unit tests
-      run: dotnet test tests/VenusAuto.Tests/VenusAuto.Core.Tests.csproj --no-build -c Release --verbosity normal
+      run: dotnet run --project tests/VenusAuto.Tests/VenusAuto.Core.Tests.csproj --no-build -c Release
 
     - name: Pack package
       run: |
