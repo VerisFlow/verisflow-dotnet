@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -49,13 +50,13 @@ namespace TraceLogic.Core.Tests.Parsing
             // Arrange
             string logLine = "2026-07-22 10:30:00> Head : Aspirate - Start; channel 1: Plate1, A1, 50.0 uL";
             string tempFilePath = Path.GetTempFileName();
-            await File.WriteAllTextAsync(tempFilePath, logLine, Encoding.UTF8);
+            await File.WriteAllTextAsync(tempFilePath, logLine, Encoding.UTF8, TestContext.Current.CancellationToken);
 
             try
             {
                 // Act
                 var entries = new List<TraceEntry>();
-                await foreach (var entry in _parser.ParseLinesAsync(tempFilePath))
+                await foreach (var entry in _parser.ParseLinesAsync(tempFilePath, cancellationToken: TestContext.Current.CancellationToken))
                 {
                     entries.Add(entry);
                 }
@@ -123,7 +124,7 @@ namespace TraceLogic.Core.Tests.Parsing
 
             // Act
             var transfers = new List<LiquidTransferEvent>();
-            await foreach (var transfer in _parser.CreateLiquidTransferEventsAsync(ToAsyncEnumerable(steps)))
+            await foreach (var transfer in _parser.CreateLiquidTransferEventsAsync(ToAsyncEnumerable(steps), cancellationToken: TestContext.Current.CancellationToken))
             {
                 transfers.Add(transfer);
             }
@@ -150,7 +151,7 @@ namespace TraceLogic.Core.Tests.Parsing
             // Arrange
             string logContent = string.Join(Environment.NewLine, SampleErrorLogLines);
             string tempFilePath = Path.GetTempFileName();
-            await File.WriteAllTextAsync(tempFilePath, logContent, Encoding.UTF8);
+            await File.WriteAllTextAsync(tempFilePath, logContent, Encoding.UTF8, TestContext.Current.CancellationToken);
 
             try
             {
