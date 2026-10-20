@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.15" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.15" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Common" Version="9.0.21" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.15" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.FileExtensions" Version="9.0.0" />
